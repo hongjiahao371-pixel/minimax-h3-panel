@@ -1236,7 +1236,7 @@ function renderGallery(list){
    <div class="vcard ${selected.has(v.name)?'sel':''}" data-name="${v.name}">
      ${manageMode?`<input type="checkbox" class="ck" ${selected.has(v.name)?'checked':''}>`:''}
      <a class="thumb" href="#" data-act="open">
-       <video src="/video/${v.name}#t=0.6" muted preload="metadata"></video>
+       <video data-src="/video/${v.name}#t=0.6" muted preload="none"></video>
        ${v.duration?`<span class="dur">${v.duration}s</span>`:''}
        ${v.merged?`<span class="tag">拼接片</span>`:(v.i2v?`<span class="tag">${v.end_frame?'首尾定界':'图生视频'}</span>`:'')}
      <button class="starb ${v.star?'on':''}" data-act="star" type="button" title="收藏">${v.star?'★':'☆'}</button>
@@ -1754,6 +1754,28 @@ function askPanelPassword() {
     inp.onkeydown = e => { if (e.key === "Enter") go(); };
   });
 }
+
+// ---------- 作品库缩略图懒加载（大库性能优化） ----------
+const _origRenderGallery = renderGallery;
+renderGallery = function(list) {
+  _origRenderGallery(list);
+  const vids = [...document.querySelectorAll('#gallery .vcard video[data-src]')];
+  if (!vids.length) return;
+  if (!('IntersectionObserver' in window)) {
+    vids.forEach(v => { v.src = v.dataset.src; delete v.dataset.src; });
+    return;
+  }
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (en.isIntersecting) {
+        const v = en.target;
+        if (v.dataset.src) { v.src = v.dataset.src; delete v.dataset.src; }
+        io.unobserve(v);
+      }
+    });
+  }, { rootMargin: '400px' });
+  vids.forEach(v => io.observe(v));
+};
 
 </script>
 </body>

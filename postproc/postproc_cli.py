@@ -226,8 +226,23 @@ def run_x2(mp4, out):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _precheck(mode):
+    """引擎文件自检，缺失时输出干净 JSON 错误（供面板透传）"""
+    problems = []
+    if not os.path.isdir(FI_DIR):
+        problems.append("Frame-Interpolation 未安装（在 postproc 目录运行 install.sh）")
+    if mode in ("rife", "rife_x2") and not os.path.isfile(os.path.join(CKPT_DIR, "rife47.pth")):
+        problems.append("rife47.pth 缺失（install.sh 自动下载）")
+    if mode in ("x2", "rife_x2") and not os.path.isfile(os.path.join(CKPT_DIR, "x2plus.pth")):
+        problems.append("x2plus.pth 缺失（install.sh 自动下载）")
+    if problems:
+        print(json.dumps({"ok": False, "error": "；".join(problems)}, ensure_ascii=False))
+        sys.exit(1)
+
+
 def main():
     mode, src, out = sys.argv[1], sys.argv[2], sys.argv[3]
+    _precheck(mode)
     os.makedirs(os.path.join(BASE, "tmp"), exist_ok=True)
     t0 = time.time()
     if mode == "rife":

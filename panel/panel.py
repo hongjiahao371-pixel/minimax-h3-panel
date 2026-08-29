@@ -291,7 +291,7 @@ def status():
                         "queued": len(q.get("queue_pending", [])),
                         "running": len(q.get("queue_running", []))})
     except Exception:
-        return jsonify({"ok": False, "error": "ComfyUI 未响应"})
+        return jsonify({"ok": False, "error": f"ComfyUI 未响应（{COMFY}）——请确认其正在运行且地址配置正确"})
 
 
 @app.route("/api/generate", methods=["POST"])
@@ -370,8 +370,9 @@ def generate():
                 try:
                     r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
                     res = r.json()
-                except Exception as e:
-                    return jsonify({"ok": False, "error": f"提交失败: {e}"})
+                except Exception:
+                    return jsonify({"ok": False, "error":
+                        f"无法连接 ComfyUI（{COMFY}）。请确认它正在运行，且 config.json 的 comfy_url 配置正确"})
                 if "prompt_id" not in res:
                     return jsonify({"ok": False, "error": res.get("error", {}).get("message", "未知错误")})
                 tid = res["prompt_id"]
@@ -638,6 +639,21 @@ def _vram_free_gb():
         return 0.0
 
 
+def _pp_engine_check(mode):
+    """引擎文件完整性预检，缺什么提示装什么"""
+    missing = []
+    fi = os.path.join(CONFIG["postproc_dir"], "Frame-Interpolation")
+    if not os.path.isdir(fi):
+        missing.append("Frame-Interpolation（在 postproc 目录运行 install.sh）")
+    if mode in ("rife", "rife_x2") and not os.path.isfile(os.path.join(CONFIG["postproc_dir"], "ckpts", "rife47.pth")):
+        missing.append("rife47.pth（install.sh 自动下载）")
+    if mode in ("x2", "rife_x2") and not os.path.isfile(os.path.join(CONFIG["postproc_dir"], "ckpts", "x2plus.pth")):
+        missing.append("x2plus.pth（install.sh 自动下载）")
+    if missing:
+        return "AI 增强引擎未就绪，缺少：" + "、".join(missing)
+    return None
+
+
 def _ensure_vram(need_gb):
     """显存不够先让 ComfyUI 卸载闲置模型，再查一次；仍不足则拒绝"""
     if _vram_free_gb() >= need_gb:
@@ -730,6 +746,9 @@ def postproc():
         return jsonify({"ok": False, "error": "视频不存在"})
     if name.startswith("merged_") and mode == "x2":
         return jsonify({"ok": False, "error": "拼接长片较长，暂不支持超分（可对单段超分后再拼接）"})
+    engine_err = _pp_engine_check(mode)
+    if engine_err:
+        return jsonify({"ok": False, "error": engine_err})
     err = _ensure_vram(PP_VRAM_NEED[mode])
     if err:
         return jsonify({"ok": False, "error": err})
@@ -1107,8 +1126,9 @@ def run_auto_job(job_id, p):
                                 p["steps"], prev_image, None, p["turbo"], p["sampler"], p["scheduler"])
             try:
                 r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10).json()
-            except Exception as e:
-                job["status"] = "error"; job["error"] = f"提交失败: {e}"
+            except Exception:
+                job["status"] = "error"
+                job["error"] = f"无法连接 ComfyUI（{COMFY}），请确认其正在运行"
                 return
             if "prompt_id" not in r:
                 job["status"] = "error"
