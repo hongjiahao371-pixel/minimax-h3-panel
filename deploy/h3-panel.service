@@ -1,0 +1,14 @@
+[Unit]
+Description=MiniMax-H3 Video Panel
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/opt/minimax-h3-panel/panel
+ExecStart=/usr/bin/python3 /opt/minimax-h3-panel/panel/panel.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

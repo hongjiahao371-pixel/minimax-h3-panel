@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+panel/config.json
+panel/data/
+postproc/Frame-Interpolation/
+postproc/ckpts/
+postproc/tmp/
+docs/screenshots/*.png.tmp
+.DS_Store

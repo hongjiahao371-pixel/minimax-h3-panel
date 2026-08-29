@@ -1,0 +1,14 @@
+{
+  "comfy_url": "http://127.0.0.1:8188",
+  "port": 8189,
+  "output_dir": "/path/to/ComfyUI/output",
+  "data_dir": "./data",
+  "postproc_dir": "../postproc",
+  "ffmpeg": "ffmpeg",
+  "ffprobe": "ffprobe",
+  "python": "python3",
+  "postproc_home": "",
+  "vram_budget_tokens": 115000000,
+  "vram_warn_tokens": 95000000,
+  "access_password": ""
+}
