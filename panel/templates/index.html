@@ -461,6 +461,29 @@ details.adv summary:hover{color:var(--ink2)}
 .bfails{margin-top:8px;display:flex;flex-direction:column;gap:4px}
 .bfails .bf{font-size:11.5px;color:#b45309;background:rgba(240,150,30,.09);
   border:1px solid rgba(240,150,30,.22);border-radius:9px;padding:6px 10px;line-height:1.5}
+.bimgrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bimgrow .mini{padding:7px 14px;border:1px solid rgba(120,140,180,.3);border-radius:999px;
+  background:rgba(255,255,255,.5);color:var(--ink2);font-size:12px;cursor:pointer}
+.bimgrow .mini:hover{border-color:rgba(59,130,246,.55);color:#14419f;background:#fff}
+.bthumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.bthumbs .bth{position:relative;width:58px;height:34px;border-radius:7px;overflow:hidden;border:1px solid rgba(120,140,180,.3)}
+.bthumbs .bth img{width:100%;height:100%;object-fit:cover;display:block}
+.bthumbs .bth i{position:absolute;top:0;left:2px;font-size:9px;font-style:normal;color:#fff;
+  background:rgba(20,30,60,.65);padding:0 3px;border-radius:0 0 4px 0}
+.bthumbs .bth .bx{position:absolute;top:0;right:0;bottom:0;width:16px;cursor:pointer;color:#fff;
+  background:rgba(200,60,60,.75);border:none;font-size:10px;line-height:34px;text-align:center;padding:0}
+.storbox{background:rgba(255,255,255,.8);backdrop-filter:blur(24px) saturate(170%);-webkit-backdrop-filter:blur(24px) saturate(170%);
+  border:1px solid rgba(255,255,255,.9);border-radius:20px;padding:24px 26px;width:min(520px,92vw);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 24px 70px -10px rgba(40,60,140,.35);display:flex;flex-direction:column;gap:12px}
+.storbody table{width:100%;border-collapse:collapse;font-size:12.5px}
+.storbody td,.storbody th{padding:7px 6px;text-align:left;border-bottom:1px solid rgba(120,140,180,.15)}
+.storbody th{color:var(--ink3);font-weight:650}
+.storbody td b{color:var(--ink)}
+.storactions{display:flex;gap:10px;justify-content:flex-end}
+.storactions button{padding:10px 18px;border:none;border-radius:12px;background:var(--grad);color:#fff;
+  font-size:12.5px;font-weight:750;cursor:pointer;box-shadow:0 6px 18px rgba(37,87,255,.3)}
+.storactions button.quiet{background:rgba(255,255,255,.6);border:1px solid rgba(120,140,180,.32);
+  color:var(--ink2);box-shadow:none}
 </style>
 </head>
 <body>
@@ -597,7 +620,7 @@ details.adv summary:hover{color:var(--ink2)}
         </div>
       </div>
 
-      <div class="row2" style="margin-bottom:12px">
+      <div class="row3" style="margin-bottom:12px">
         <div>
           <label>生成后自动处理</label>
           <select id="autopost">
@@ -607,7 +630,13 @@ details.adv summary:hover{color:var(--ink2)}
             <option value="rife_x2">🚀 全链：插帧 → 超分（48fps + 1080p）</option>
           </select>
         </div>
-        <div class="muted-note">成片完成后自动执行，也会出现在任务队列栏；历史作品可随时在卡片上点 🪄 手动增强</div>
+        <div>
+          <label>加速 LoRA（官方 Turbo）</label>
+          <select id="lora">
+            <option value="">不使用</option>
+          </select>
+        </div>
+        <div class="muted-note" id="loraNote" style="align-self:end">成片完成后自动执行，也会出现在任务队列栏；LoRA 在模型库一键下载后可选，选用即锁步数并与加速缓存互斥</div>
       </div>
 
       <div class="row3">
@@ -741,6 +770,21 @@ details.adv summary:hover{color:var(--ink2)}
         <div class="muted-note" id="batchSummary" style="align-self:end">参数沿用创作台（画幅 / 画质 / 时长 / 步数 / 模型 / 加速 / 自动处理）</div>
         <div></div>
       </div>
+      <div class="row2" style="margin-top:12px;align-items:start">
+        <div>
+          <label>首帧图（可选 · 第 i 张对应第 i 行提示词，图少的行走文生视频）</label>
+          <div class="bimgrow">
+            <input type="file" id="batchImgs" accept="image/*" multiple style="display:none">
+            <button class="mini" id="batchImgBtn" type="button">⬆ 选图片</button>
+            <span class="muted" style="font-size:11px" id="batchImgHint">不传则全部文生视频；图片会统一裁剪到当前画幅</span>
+          </div>
+          <div id="batchThumbs" class="bthumbs"></div>
+        </div>
+        <div class="muted-note" style="align-self:start;padding-top:4px">
+          <label class="switch" style="vertical-align:middle"><input type="checkbox" id="batchConcat"><span class="track"></span></label>
+          <span style="margin-left:6px">跑完自动拼接成合集（同尺寸无损拼接，额外入库一条长片）</span>
+        </div>
+      </div>
       <div class="brow">
         <button class="go" id="batchGo" type="button">🌙 开始通宵跑</button>
         <button class="cancel" id="batchCancel" hidden>停止批次（当前片跑完后停）</button>
@@ -761,6 +805,8 @@ details.adv summary:hover{color:var(--ink2)}
   <section class="library" id="historySec">
     <div class="lib-head">
       <span class="lib-title">📚 作品库</span>
+      <span style="flex:1"></span>
+      <button class="mgmt" id="storBtn" type="button">🧹 容量管理</button>
       <button class="mgmt" id="mgmt" type="button">批量管理</button>
     </div>
     <input type="search" id="search" placeholder="按提示词搜索作品…">
@@ -778,7 +824,7 @@ details.adv summary:hover{color:var(--ink2)}
     </div>
   </section>
 
-  <div class="foot">MiniMax-H3 面板 v6.0 · 通宵批量 · 模型库 · 毛玻璃 · 任务跟踪 · AI 增强 · 参数矩阵 · 工作流可视化</div>
+  <div class="foot">MiniMax-H3 面板 v7.0 · Turbo LoRA · 批量带图 · 容量管理 · 通宵批量 · 模型库 · 任务跟踪 · AI 增强</div>
 </main>
 
 <div class="cmp" id="cmp" hidden>
@@ -788,6 +834,18 @@ details.adv summary:hover{color:var(--ink2)}
     <button id="cmpPlay" type="button">▶ 同步播放 / 暂停</button>
     <input type="range" id="cmpSeek" min="0" max="1000" value="0">
     <span id="cmpTime" class="muted"></span>
+  </div>
+</div>
+
+<div class="cmp" id="storOv" hidden>
+  <button class="close" id="storClose" type="button">✕</button>
+  <div class="storbox">
+    <div class="mh-title">🧹 容量管理</div>
+    <div id="storBody" class="storbody">加载中…</div>
+    <div class="storactions">
+      <button class="quiet" id="storRefresh" type="button">刷新</button>
+      <button id="storClean" type="button">清理旧作品</button>
+    </div>
   </div>
 </div>
 
@@ -1015,13 +1073,14 @@ $('#chainMode').addEventListener('click',e=>{
 });
 updChainUI();
 function updEta(){
-  const [w,h]=curRes(),len=+$('#length').value,steps=+$('#steps').value,turbo=$('#turbo').checked,
+  const [w,h]=curRes(),len=+$('#length').value,steps=effSteps(),turbo=effTurbo(),
     scanV=(($('#stepscan')&&$('#stepscan').value||'').split(',').filter(Boolean).length)||1,
     n=(+$('#count').value)*scanV;
   const imgFactor=(img1||img2)?1.05:1;
   const tokens=w*h*len;
   const cm=curModel()||(window.H3MODELS&&window.H3MODELS.default_model)||'';
-  const bucket=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo&&(b.model||'')===cm);
+  const cl=curLora();
+  const bucket=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo&&(b.model||'')===cm&&(b.lora||'')===cl);
   let sec=bucket?bucket.avg*n*imgFactor:143*(tokens)/(864*480*124)*(steps/8)*(turbo?1:1.43)*n*imgFactor*(1+tokens/TOKEN_BUDGET*0.35);
   const oomMax=window.H3STATS&&window.H3STATS.oom_tokens_max;
   const eta=$('#eta');
@@ -1096,7 +1155,7 @@ document.addEventListener('paste',e=>{
 
 // ---------- websocket：进度 + 潜空间实时预览 ----------
 let ws=null, latentURL=null;
-const NODE_STAGE={"1":3,"2":6,"3":8,"4":9,"5":10,"6":12,"7":24,"8":25,"9":82,"10":84,"11":90,"12":96,"13":99};
+const NODE_STAGE={"1":3,"2":6,"3":8,"4":9,"5":10,"6":12,"7":24,"8":25,"9":82,"10":84,"11":90,"12":96,"13":99,"16":4};
 const STAGE_NAMES={6:"文本编码中",7:"准备采样",8:"采样生成中",9:"分离音视频",10:"视频解码",11:"音频解码",12:"封装视频",13:"保存中"};
 window._stagePct=0; window._stageName='';
 function openWS(){
@@ -1152,7 +1211,8 @@ $('#go').addEventListener('click',()=>{
   const [w,h]=curRes();
   const cur={prompt,w,h,len:+$('#length').value,steps:+$('#steps').value,
     turbo:$('#turbo').checked,sampler:$('#sampler').value,scheduler:$('#scheduler').value,
-    seed:+$('#seed').value,count:+$('#count').value,i2v:!!(img1||img2),model:$('#model').value||''};
+    seed:+$('#seed').value,count:+$('#count').value,i2v:!!(img1||img2),model:$('#model').value||'',
+    lora:$('#lora').value||''};
   if(lastSubmit&&JSON.stringify(cur)===JSON.stringify(lastSubmit)&&cur.seed>0){
     if(!confirm('参数与上一次生成完全相同（包括种子），结果可能一样，仍要继续吗？')){
       pendingCont=false;return;
@@ -1172,7 +1232,7 @@ $('#go').addEventListener('click',()=>{
     body:JSON.stringify({prompt,width:w,height:h,length:+$('#length').value,steps:+$('#steps').value,
       count:+$('#count').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,crop:$('#crop').value,force:forceFlag,
-      model:$('#model').value||undefined,
+      model:$('#model').value||undefined,lora:$('#lora').value||undefined,
       steps_list:(($('#stepscan')&&$('#stepscan').value||'').split(',').filter(Boolean).map(Number)),
       image_base64:img1||undefined,end_image_base64:img2||undefined})})
   .then(r=>r.json()).then(d=>{
@@ -1260,7 +1320,7 @@ function submitAutoChain(prompt,w,h){
     body:JSON.stringify({prompt,width:w,height:h,length:len,segments:segs,
       steps:+$('#steps').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,
-      model:$('#model').value||undefined,
+      model:$('#model').value||undefined,lora:$('#lora').value||undefined,
       force:w*h*len>TOKEN_BUDGET})})
   .then(r=>r.json()).then(d=>{
     if(!d.ok){$('#progText').textContent='提交失败';$('#err').textContent=d.error;finish();return;}
@@ -1464,6 +1524,7 @@ $('#gallery').addEventListener('click',async e=>{
     if(v.crop)$('#crop').value=v.crop;
     if(v.turbo!=null)$('#turbo').checked=v.turbo;
     if(v.model&&[...$('#model').options].some(o=>o.value===v.model)){$('#model').value=v.model;updModelNote();}
+    if(v.lora!==undefined&&[...$('#lora').options].some(o=>o.value===v.lora)){$('#lora').value=v.lora;applyLoraUI();}
     chain=[];
     window.scrollTo({top:0,behavior:'smooth'});
   }else if(act==='cont'){
@@ -1547,6 +1608,7 @@ function refillFromParams(p){
   if(p.scheduler)$('#scheduler').value=p.scheduler;
   if(p.crop)$('#crop').value=p.crop;
   if(p.model&&[...$('#model').options].some(o=>o.value===p.model)){$('#model').value=p.model;updModelNote();}
+  if(p.lora&&[...$('#lora').options].some(o=>o.value===p.lora)){$('#lora').value=p.lora;applyLoraUI();}
   if(p.w&&p.h){
     const ar=p.w/p.h;aspect=ar>1.25?'16:9':(ar<0.8?'9:16':'1:1');
     const qi=RES[aspect].findIndex(r=>Math.abs(r[0]-p.w)<=32);quality=Math.max(0,qi);
@@ -1767,7 +1829,7 @@ function presetParams() {
     steps: +$('#steps').value, sampler: $('#sampler').value,
     scheduler: $('#scheduler').value, crop: $('#crop').value,
     turbo: $('#turbo').checked, autopost: $('#autopost').value,
-    model: $('#model').value
+    model: $('#model').value, lora: $('#lora').value
   };
 }
 function applyPreset(p) {
@@ -1784,6 +1846,7 @@ function applyPreset(p) {
     if (p.turbo != null) $('#turbo').checked = !!p.turbo;
     if (p.autopost != null) $('#autopost').value = p.autopost;
     if (p.model && [...$('#model').options].some(o => o.value === p.model)) { $('#model').value = p.model; updModelNote(); }
+    if (p.lora !== undefined && [...$('#lora').options].some(o => o.value === p.lora)) { $('#lora').value = p.lora; applyLoraUI(); }
     updQualityLabels(); updEta(); renderPipe();
   } catch (_) {}
 }
@@ -1902,7 +1965,7 @@ function loadModels(){
   return fetch('/api/models').then(r=>r.json()).then(d=>{
     if(!d.ok)return;
     window.H3MODELS=d;
-    fillModelSelect();updModelNote();renderModelHub();updEta();
+    fillModelSelect();updModelNote();renderModelHub();fillLoraSelect();applyLoraUI();updEta();
   }).catch(()=>{});
 }
 loadModels(); setInterval(loadModels,4000);
@@ -1927,18 +1990,61 @@ $('#modelGrid').addEventListener('click',e=>{
   }
 });
 
+// ---------- v7.0 加速 LoRA ----------
+function curLora(){return ($('#lora')&&$('#lora').value)||'';}
+function loraEntry(){
+  const m=window.H3MODELS; if(!m)return null;
+  const fn=curLora(); if(!fn)return null;
+  return (m.installed||[]).concat(m.available||[]).find(x=>x.filename===fn&&x.kind==='lora')||null;
+}
+function effSteps(){
+  const e=loraEntry();
+  if(e&&e.lora_steps)return e.lora_steps;
+  const m=window.H3MODELS;
+  return +$('#steps').value;
+}
+function effTurbo(){
+  return $('#turbo').checked&&!curLora();
+}
+function fillLoraSelect(){
+  const m=window.H3MODELS, sel=$('#lora'); if(!m||!sel)return;
+  const loras=(m.available||[]).filter(x=>x.kind==='lora')
+    .concat((m.installed||[]).filter(x=>x.kind==='lora'));
+  const prev=sel.value||localStorage.getItem('h3lora')||'';
+  sel.innerHTML='<option value="">不使用</option>'+
+    loras.map(x=>'<option value="'+esc(x.filename)+'">'+esc(x.label)+(x.installed?'':'（未下载）')+'</option>').join('');
+  if(prev&&loras.some(x=>x.filename===prev))sel.value=prev;
+}
+function applyLoraUI(){
+  const e=loraEntry();
+  $('#turbo').disabled=!!(e&&e.lora_steps);
+  const note=$('#loraNote');
+  if(e&&e.lora_steps){
+    note.innerHTML='已选 <b>'+esc(e.label)+'</b>：采样步数锁定 <b>'+e.lora_steps+'</b> 步，加速缓存自动失效'+(e.installed?'':'（<span style="color:#b45309">尚未下载，提交会报错——先到模型库一键下载</span>）');
+  }else{
+    note.textContent='成片完成后自动执行，也会出现在任务队列栏；LoRA 在模型库一键下载后可选，选用即锁步数并与加速缓存互斥';
+  }
+  updEta();
+}
+$('#lora').addEventListener('change',()=>{
+  applyLoraUI();
+  try{localStorage.setItem('h3lora',$('#lora').value)}catch(_){}
+  $('#stepscan').value='';
+});
+
 // ---------- v6.0 通宵批量 ----------
 window._batchRunning=false; let _batchSeenCnt=0;
 const BATCH_PP_EST={'':0,'rife':25,'x2':85,'rife_x2':110};
 function batchLines(){return $('#batchPrompts').value.split('\n').map(s=>s.trim()).filter(Boolean);}
 function batchCount(){return batchLines().length*(+$('#batchPer').value||1);}
 function batchEtaSec(){
-  const [w,h]=curRes(),len=+$('#length').value,steps=+$('#steps').value,turbo=$('#turbo').checked;
+  const [w,h]=curRes(),len=+$('#length').value,steps=effSteps(),turbo=effTurbo();
   const cm=curModel()||(window.H3MODELS&&window.H3MODELS.default_model)||'';
-  const b=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo&&(b.model||'')===cm);
+  const cl=curLora();
+  const b=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo&&(b.model||'')===cm&&(b.lora||'')===cl);
   const tokens=w*h*len;
   const per=b?b.avg:143*tokens/(864*480*124)*(steps/8)*(turbo?1:1.43)*(1+tokens/TOKEN_BUDGET*0.35);
-  return per+(BATCH_PP_EST[$('#autopost').value]||0);
+  return per+(BATCH_PP_EST[$('#autopost').value]||0)+($('#batchConcat').checked?BATCH_PP_EST.concat:0);
 }
 function fmtClock(ts){const d=new Date(ts*1000);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);}
 function updBatchSummary(){
@@ -1952,6 +2058,26 @@ function updBatchSummary(){
 $('#batchPrompts').addEventListener('input',updBatchSummary);
 $('#batchPer').addEventListener('change',updBatchSummary);
 $('#autopost').addEventListener('change',updBatchSummary);
+$('#batchConcat').addEventListener('change',updBatchSummary);
+let batchImages=[];
+function renderBatchThumbs(){
+  $('#batchThumbs').innerHTML=batchImages.map((src,i)=>
+    '<span class="bth"><i>'+(i+1)+'</i><img src="'+src+'" alt="p'+(i+1)+'"><button class="bx" data-bi="'+i+'" type="button">✕</button></span>').join('');
+  $('#batchImgHint').textContent=batchImages.length
+    ?('已选 '+batchImages.length+' 张：第 1 张→第 1 行，依此类推'+(batchLines().length>batchImages.length?('（第 '+(batchImages.length+1)+' 行起走文生视频）'):''))
+    :'不传则全部文生视频；图片会统一裁剪到当前画幅';
+  updBatchSummary();
+}
+$('#batchImgBtn').addEventListener('click',()=>$('#batchImgs').click());
+$('#batchImgs').addEventListener('change',e=>{
+  const files=[...(e.target.files||[])];
+  files.forEach(f=>{const rd=new FileReader();rd.onload=()=>{batchImages.push(rd.result);renderBatchThumbs();};rd.readAsDataURL(f);});
+  e.target.value='';
+});
+$('#batchThumbs').addEventListener('click',e=>{
+  const b=e.target.closest('.bx'); if(!b)return;
+  batchImages.splice(+b.dataset.bi,1);renderBatchThumbs();
+});
 $('#navBatch').addEventListener('click',()=>{
   setActiveNav('navBatch');
   updBatchSummary();
@@ -1973,11 +2099,13 @@ function renderBatch(j){
   const bits=['<b>'+finished+'/'+j.total+'</b> 个任务','<b>'+(j.done||0)+'</b> 成功','<b>'+(j.failed||0)+'</b> 失败'];
   if(j.conn_retry)bits.push('<span style="color:#b45309">⚠ ComfyUI 连接中断，重试中（第 '+j.conn_retry+'/30 次）</span>');
   if(running&&j.eta_end)bits.push('预计 <b>'+fmtClock(j.eta_end)+'</b> 跑完');
+  if(j.merged)bits.push('🎞 合集：<b><a href="/video/'+j.merged+'" target="_blank" style="color:#14419f">'+j.merged+'</a></b>');
   $('#batchStat').innerHTML=bits.join(' · ');
   const cur=j.current;
   $('#batchCur').innerHTML=running&&cur
-    ?('正在跑第 <b>'+cur.index+'/'+j.total+'</b> 个：<b>'+esc(cur.prompt.slice(0,46))+(cur.prompt.length>46?'…':'')+'</b> · 种子 '+cur.seed
-      +(j.params?(' · '+esc(j.params.width+'×'+j.params.height)+' · '+(j.params.model_label||'')):''))
+    ?('正在跑第 <b>'+cur.index+'/'+j.total+'</b> 个：<b>'+esc(cur.prompt.slice(0,46))+(cur.prompt.length>46?'…':'')+'</b>'
+      +(cur.seed!=null?(' · 种子 '+cur.seed):'')+(cur.i2v?' · 🖼 带首帧图':'')
+      +(j.params?(' · '+esc(j.params.width+'×'+j.params.height)+' · '+esc(j.params.model_label||'')+(j.params.lora_label?(' + '+esc(j.params.lora_label)):'')):''))
     :'';
   const fl=j.failures||[];
   $('#batchFails').innerHTML=fl.length
@@ -2010,13 +2138,18 @@ $('#batchGo').addEventListener('click',()=>{
   if(n>240){alert('共 '+n+' 个任务，超出单批上限 240（减少提示词行数或种子数）');return;}
   const [w,h]=curRes(),len=+$('#length').value;
   if(w*h*len>TOKEN_BUDGET&&!confirm('当前画幅/时长组合超出显存预算，每个任务都会失败。仍要开始吗？'))return;
-  if(!confirm('将按顺序自动生成 '+n+' 个视频（约 '+(batchEtaSec()*n/3600).toFixed(1)+' 小时），期间可随时插队临时任务或停止批次。开始？'))return;
+  if(!confirm('将按顺序自动生成 '+n+' 个视频（约 '+(batchEtaSec()*n/3600).toFixed(1)+' 小时）'
+    +(batchImages.length?('，前 '+batchImages.length+' 行带首帧图'):'')
+    +($('#batchConcat').checked?'，跑完自动拼接合集':'')
+    +'。期间可随时插队临时任务或停止批次。开始？'))return;
   $('#batchGo').disabled=true;$('#batchGo').textContent='提交中…';
   fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({prompts:$('#batchPrompts').value,per_prompt:+$('#batchPer').value,
       width:w,height:h,length:len,steps:+$('#steps').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,crop:$('#crop').value,
-      model:$('#model').value||undefined,autopost:$('#autopost').value||'',
+      model:$('#model').value||undefined,lora:$('#lora').value||undefined,
+      autopost:$('#autopost').value||'',auto_concat:$('#batchConcat').checked,
+      images_base64:batchImages.length?batchImages:undefined,
       force:w*h*len>TOKEN_BUDGET})})
   .then(r=>r.json()).then(d=>{
     $('#batchGo').disabled=false;$('#batchGo').textContent='🌙 开始通宵跑';
@@ -2042,6 +2175,33 @@ $('#batchCancel').addEventListener('click',()=>{
     }
   }catch(_){}
 })();
+
+// ---------- v7.0 容量管理 ----------
+function fmtGB(x){return (x==null?'?':x)+' GB';}
+function loadStorage(){
+  fetch('/api/storage').then(r=>r.json()).then(d=>{
+    if(!d.ok){$('#storBody').textContent='加载失败';return;}
+    const rows=d.groups.map(g=>'<tr><td>'+esc(g.label)+'</td><td>'+g.n+' 个</td><td><b>'+g.gb+' GB</b></td></tr>').join('');
+    $('#storBody').innerHTML='<table><tr><th>分类</th><th>数量</th><th>体积</th></tr>'+rows+
+      '<tr><td><b>合计</b></td><td><b>'+d.total_n+'</b> 个</td><td><b>'+d.total_gb+' GB</b></td></tr></table>'+
+      '<div style="margin-top:8px;font-size:12px;color:var(--ink2)">★ 星标保护：'+d.star_n+' 个 / '+d.star_gb+' GB · 磁盘剩余 '+d.disk_free_gb+' GB · 清理固定保留星标与最近 '+d.keep_days+' 天的作品</div>';
+  }).catch(()=>{$('#storBody').textContent='加载失败';});
+}
+$('#storBtn').addEventListener('click',()=>{$('#storOv').hidden=false;loadStorage();});
+$('#storClose').addEventListener('click',()=>{$('#storOv').hidden=true;});
+$('#storOv').addEventListener('click',e=>{if(e.target.id==='storOv')$('#storOv').hidden=true;});
+$('#storRefresh').addEventListener('click',loadStorage);
+$('#storClean').addEventListener('click',()=>{
+  fetch('/api/videos/cleanup/preview').then(r=>r.json()).then(p=>{
+    if(!p.ok){alert('预览失败');return;}
+    if(!p.count){alert('没有满足清理条件的作品（只清理非星标且超过 7 天的）');return;}
+    if(!confirm('将删除 '+p.count+' 个作品，释放约 '+p.gb+' GB。\n示例：'+p.samples.join('、')+' …\n（星标与最近 7 天的作品不受影响）\n\n确认清理？'))return;
+    fetch('/api/videos/cleanup',{method:'POST'}).then(r=>r.json()).then(d=>{
+      if(d.ok){alert('已删除 '+d.deleted+' 个作品，释放 '+d.freed_gb+' GB');loadStorage();loadGallery();}
+      else alert(d.error||'清理失败');
+    });
+  }).catch(()=>alert('预览失败'));
+});
 
 // ---------- v4.3 步数扫描联动 ----------
 document.getElementById('stepscan').addEventListener('change', () => updEta());

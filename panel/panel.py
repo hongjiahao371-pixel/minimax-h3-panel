@@ -71,6 +71,8 @@ MODEL_EXTS = (".safetensors", ".gguf", ".sft")
 # ComfyUI 实际扫描的权重目录（UNETLoader / UnetLoaderGGUF 都从这里列文件）
 MODELS_DIR = CONFIG.get("comfy_models_dir") or os.path.join(
     os.path.dirname(OUTPUT.rstrip(os.sep)), "models", "diffusion_models")
+# LoRA 目录（diffusion_models 的兄弟目录，LoraLoaderModelOnly 从这里列文件）
+LORAS_DIR = os.path.join(os.path.dirname(MODELS_DIR.rstrip(os.sep)), "loras")
 DEFAULT_MODEL = CONFIG.get("default_model") or UNET
 CATALOG_FILE = os.path.join(BASE_DIR, "models_catalog.json")
 DL_FILE = os.path.join(CONFIG["data_dir"], "downloads.json")
@@ -132,12 +134,14 @@ def _meta_from_history(item):
         n8 = graph.get("8", {}).get("inputs", {})
         n1 = graph.get("1", {}).get("inputs", {})
         unet_fn = n1.get("unet_name") or UNET
+        lora_fn = graph.get("16", {}).get("inputs", {}).get("lora_name") or ""
         meta.update({"prompt": n6.get("prompt"), "width": n6.get("width"),
                      "height": n6.get("height"), "length": n6.get("length"),
                      "seed": n8.get("seed"), "steps": n8.get("steps"),
                      "sampler": n8.get("sampler_name"), "scheduler": n8.get("scheduler"),
                      "turbo": "5" in graph, "i2v": "14" in graph, "end_frame": "15" in graph,
-                     "model": unet_fn, "model_label": (CATALOG.get(unet_fn) or {}).get("label") or unet_fn})
+                     "model": unet_fn, "model_label": (CATALOG.get(unet_fn) or {}).get("label") or unet_fn,
+                     "lora": lora_fn, "lora_label": (CATALOG.get(lora_fn) or {}).get("label") or lora_fn})
     except Exception:
         pass
     return meta
@@ -225,7 +229,7 @@ def _unet_loader_node(model_profile):
 
 
 def build_workflow(prompt, width, height, length, seed, steps, image_name=None, end_image_name=None,
-                   turbo=False, sampler="euler", scheduler="normal", model_profile=None):
+                   turbo=False, sampler="euler", scheduler="normal", model_profile=None, lora=None):
     w = width // 32 * 32
     h = height // 32 * 32
     wf = {
@@ -234,7 +238,7 @@ def build_workflow(prompt, width, height, length, seed, steps, image_name=None, 
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_VID}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_AUD}},
         "6": {"class_type": "MiniMaxH3ImageToVideo", "inputs": {"clip": ["2", 0], "vae": ["3", 0], "prompt": prompt, "width": w, "height": h, "length": length}},
-        "7": {"class_type": "MiniMaxH3SigmaShift", "inputs": {"model": (["5", 0] if turbo else ["1", 0]), "shift_video": 12.0, "shift_audio": 3.0}},
+        "7": {"class_type": "MiniMaxH3SigmaShift", "inputs": {"model": ["1", 0], "shift_video": 12.0, "shift_audio": 3.0}},
         "8": {"class_type": "KSampler", "inputs": {"model": ["7", 0], "seed": seed, "steps": steps, "cfg": 1.0, "sampler_name": sampler, "scheduler": scheduler, "positive": ["6", 0], "negative": ["6", 0], "latent_image": ["6", 1], "denoise": 1.0}},
         "9": {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": ["8", 0]}},
         "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["3", 0]}},
@@ -242,10 +246,16 @@ def build_workflow(prompt, width, height, length, seed, steps, image_name=None, 
         "12": {"class_type": "CreateVideo", "inputs": {"images": ["10", 0], "fps": 24.0, "audio": ["11", 0]}},
         "13": {"class_type": "SaveVideo", "inputs": {"video": ["12", 0], "filename_prefix": "h3_video", "format": "auto", "codec": "auto"}},
     }
-    if turbo:
+    if lora:
+        # Turbo 蒸馏 LoRA：1→16→7；与 TeaCache（节点 5）互斥，步数由调用方锁定
+        wf["16"] = {"class_type": "LoraLoaderModelOnly",
+                    "inputs": {"lora_name": lora, "strength_model": 1.0, "model": ["1", 0]}}
+        wf["7"]["inputs"]["model"] = ["16", 0]
+    if turbo and not lora:
         wf["5"] = {"class_type": "MiniMaxH3Cache", "inputs": {"model": ["1", 0],
             "resuse_threshold": 0.10, "start_percent": 0.15, "end_percent": 0.9,
             "max_steps": 2, "device": "auto", "verbose": False}}
+        wf["7"]["inputs"]["model"] = ["5", 0]
     if image_name:
         wf["14"] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
         wf["6"]["inputs"]["first_frame"] = ["14", 0]
@@ -363,6 +373,12 @@ def generate():
     if prof["needs_gguf"] and _gguf_ready() is not True:
         return jsonify({"ok": False, "error": "ComfyUI 未检出 GGUF 加载组件（UnetLoaderGGUF），无法使用 GGUF 模型；"
                                              "请先在 ComfyUI 安装 ComfyUI-GGUF 并重启"})
+    if prof.get("steps_fixed") and data.get("lora"):
+        return jsonify({"ok": False, "error": "加速版权重不能叠加 Turbo LoRA（自身已折叠加速），请二选一"})
+    try:
+        lora_fn, lora_steps, lora_label = _resolve_lora(data.get("lora"))
+    except LookupError as e:
+        return jsonify({"ok": False, "error": str(e)})
 
     def upload_b64_image(b64):
         img = Image.open(io.BytesIO(base64.b64decode(b64.split(",")[-1]))).convert("RGB")
@@ -406,15 +422,17 @@ def generate():
 
     tasks = []
     steps_list = list(steps_list)
-    if prof.get("steps_fixed"):
+    if lora_steps:
+        steps_list = [lora_steps]  # Turbo LoRA 步数锁定
+    elif prof.get("steps_fixed"):
         steps_list = [int(prof["steps_fixed"])]  # 加速版权重折叠了 LoRA，步数锁定
-    turbo_eff = turbo and prof.get("turbo_compat", True)  # 与 TeaCache 互斥的权重自动关加速
+    turbo_eff = turbo and prof.get("turbo_compat", True) and not lora_fn  # LoRA 与 TeaCache 互斥
     with LOCK:
         for stp in steps_list:
             for i in range(count):
                 actual_seed = (seed + i) if seed else random.randint(1, 2**31 - 1)
                 wf = build_workflow(prompt, use_w, use_h, length, actual_seed, stp,
-                                    image_name, end_image_name, turbo_eff, sampler, scheduler, prof)
+                                    image_name, end_image_name, turbo_eff, sampler, scheduler, prof, lora_fn)
                 try:
                     r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
                     res = r.json()
@@ -429,6 +447,7 @@ def generate():
                               "turbo": turbo_eff, "i2v": bool(image_name), "end_frame": bool(end_image_name),
                               "sampler": sampler, "scheduler": scheduler, "crop": crop,
                               "model": prof["filename"], "model_label": prof["label"],
+                              "lora": lora_fn or "", "lora_label": lora_label or "",
                               "t0": time.time(), "time": int(time.time())}
                 tasks.append({"task_id": tid, "seed": actual_seed, "steps": stp})
                 threading.Thread(target=_watch_task, args=(tid,), daemon=True).start()
@@ -438,7 +457,8 @@ def generate():
                     "width": use_w if not image_name else TASKS[tasks[0]["task_id"]]["width"],
                     "height": use_h if not image_name else TASKS[tasks[0]["task_id"]]["height"],
                     "length": length, "count": count, "turbo": turbo_eff,
-                    "model": prof["filename"], "model_label": prof["label"]})
+                    "model": prof["filename"], "model_label": prof["label"],
+                    "lora": lora_fn or "", "lora_label": lora_label or ""})
 
 
 def _finalize_task(tid, item):
@@ -567,7 +587,7 @@ def active():
     cutoff = time.time() - 6 * 3600
     with LOCK:
         keys = ("prompt", "seed", "width", "height", "length", "steps", "turbo", "time",
-                "model", "model_label")
+                "model", "model_label", "lora", "lora_label")
         items = [{"task_id": tid, **{k: v.get(k) for k in keys}}
                  for tid, v in TASKS.items() if v.get("t0", 0) >= cutoff]
     return jsonify({"ok": True, "tasks": items})
@@ -662,13 +682,14 @@ def stats():
         if not gs or not w or not h or not ln or m.get("merged") or m.get("chain") or m.get("postproc"):
             continue  # 拼接片/接龙段/后处理片不计入生成耗时分桶
         mdl = m.get("model") or UNET  # 历史数据无模型字段 → 都是出厂基线
-        key = f"{w}x{h}x{ln}x{st}x{1 if m.get('turbo') else 0}x{mdl}"
-        b = buckets.setdefault(key, {"w": w, "h": h, "len": ln, "steps": st, "model": mdl,
+        lr = m.get("lora") or ""
+        key = f"{w}x{h}x{ln}x{st}x{1 if m.get('turbo') else 0}x{mdl}x{lr}"
+        b = buckets.setdefault(key, {"w": w, "h": h, "len": ln, "steps": st, "model": mdl, "lora": lr,
                                      "turbo": bool(m.get("turbo")), "n": 0, "total": 0})
         b["n"] += 1
         b["total"] += gs
     out = [{"w": b["w"], "h": b["h"], "len": b["len"], "steps": b["steps"],
-            "turbo": b["turbo"], "model": b["model"], "n": b["n"], "avg": round(b["total"] / b["n"])}
+            "turbo": b["turbo"], "model": b["model"], "lora": b["lora"], "n": b["n"], "avg": round(b["total"] / b["n"])}
            for b in buckets.values()]
     oom = [f.get("tokens") for f in failures
            if f.get("tokens") and ("OOM" in (f.get("error") or "") or "out of memory" in (f.get("error") or "").lower())]
@@ -713,6 +734,28 @@ def _installed_models():
                 and fn.lower().endswith(MODEL_EXTS) and os.path.isfile(os.path.join(MODELS_DIR, fn))]
     except OSError:
         return []
+
+
+def _installed_loras():
+    try:
+        return [fn for fn in sorted(os.listdir(LORAS_DIR))
+                if not fn.startswith(".") and not fn.endswith((".part", ".tmp"))
+                and fn.lower().endswith(MODEL_EXTS) and os.path.isfile(os.path.join(LORAS_DIR, fn))]
+    except OSError:
+        return []
+
+
+def _resolve_lora(name):
+    """加速 LoRA 选择 → (文件名, 锁定步数, 展示名)；未选返回 (None, None, None)"""
+    fn = os.path.basename(str(name or ""))
+    if not fn:
+        return None, None, None
+    e = CATALOG.get(fn) or {}
+    if e.get("kind") != "lora":
+        return None, None, None
+    if fn not in _installed_loras():
+        raise LookupError(f"加速 LoRA 未安装：{e.get('label') or fn}（到模型库一键下载）")
+    return fn, int(e.get("lora_steps") or 8), (e.get("label") or fn)
 
 
 def _model_profile(name):
@@ -766,7 +809,8 @@ def _rec_tier(size_gb, vram_gb):
 def _download_worker(entry):
     a = DL.get("active") or {}
     fn = entry["filename"]
-    final = os.path.join(MODELS_DIR, fn)
+    target_dir = LORAS_DIR if entry.get("kind") == "lora" else MODELS_DIR
+    final = os.path.join(target_dir, fn)
     part = final + ".part"
     a.update({"status": "downloading", "error": "",
               "downloaded": os.path.getsize(part) if os.path.isfile(part) else 0,
@@ -824,7 +868,8 @@ def _download_worker(entry):
     _dl_save()
 
 
-def _model_entry_view(fn, hw):
+def _model_entry_view(fn, hw, base_dir=None):
+    base_dir = base_dir or MODELS_DIR
     e = dict(CATALOG.get(fn) or {})
     e.setdefault("id", fn)
     e.setdefault("label", fn)
@@ -832,7 +877,7 @@ def _model_entry_view(fn, hw):
     e.setdefault("desc", "本地已安装的模型文件（未在内置目录登记）")
     e["filename"] = fn
     try:
-        e["size_gb"] = round(os.path.getsize(os.path.join(MODELS_DIR, fn)) / 1024 ** 3, 2)
+        e["size_gb"] = round(os.path.getsize(os.path.join(base_dir, fn)) / 1024 ** 3, 2)
     except OSError:
         pass
     tier, note = _rec_tier(e.get("size_gb"), hw.get("vram_gb"))
@@ -844,11 +889,17 @@ def _model_entry_view(fn, hw):
 def models_info():
     hw = _hardware()
     inst = _installed_models()
+    lora_inst = _installed_loras()
     act = DL.get("active")
     items = []
     for fn in inst:
         e = _model_entry_view(fn, hw)
         e.update({"installed": True, "is_default": fn == DEFAULT_MODEL,
+                  "downloading": bool(act and act.get("filename") == fn and act.get("status") == "downloading")})
+        items.append(e)
+    for fn in lora_inst:
+        e = _model_entry_view(fn, hw, LORAS_DIR)
+        e.update({"installed": True, "is_default": False,
                   "downloading": bool(act and act.get("filename") == fn and act.get("status") == "downloading")})
         items.append(e)
     known = {i["filename"] for i in items}
@@ -877,12 +928,14 @@ def models_download():
         act = DL.get("active")
         if act and act.get("status") in ("downloading", "starting"):
             return jsonify({"ok": False, "error": f"已有下载任务在进行：{act.get('label')}"})
-        if fn in _installed_models():
+        target_dir = LORAS_DIR if entry.get("kind") == "lora" else MODELS_DIR
+        installed_here = _installed_loras() if entry.get("kind") == "lora" else _installed_models()
+        if fn in installed_here:
             return jsonify({"ok": False, "error": "该模型已安装，无需重复下载"})
         need = int(round((entry.get("size_gb") or 0) * 1024 ** 3))
         if need:
             try:
-                free = shutil.disk_usage(MODELS_DIR).free
+                free = shutil.disk_usage(target_dir).free
             except Exception:
                 free = None
             if free is not None and free < need * 1.05:
@@ -911,6 +964,8 @@ def models_download_cancel():
 def models_default():
     global DEFAULT_MODEL
     fn = os.path.basename((request.json or {}).get("filename") or "")
+    if (CATALOG.get(fn) or {}).get("kind") == "lora":
+        return jsonify({"ok": False, "error": "LoRA 是加速插件，不能设为默认模型；在高级选项的「加速 LoRA」里选用"})
     if fn not in _installed_models():
         return jsonify({"ok": False, "error": "模型未安装，不能设为默认"})
     DEFAULT_MODEL = fn
@@ -930,8 +985,9 @@ def models_default():
 @app.route("/api/models/<path:fn>", methods=["DELETE"])
 def models_delete(fn):
     fn = os.path.basename(fn)
-    path = os.path.join(MODELS_DIR, fn)
-    if not os.path.isfile(path):
+    path = next((os.path.join(d, fn) for d in (MODELS_DIR, LORAS_DIR)
+                 if os.path.isfile(os.path.join(d, fn))), None)
+    if not path:
         return jsonify({"ok": False, "error": "文件不存在"})
     if fn == DEFAULT_MODEL:
         return jsonify({"ok": False, "error": "默认模型不可删除；请先把其他模型设为默认"})
@@ -943,6 +999,98 @@ def models_delete(fn):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
     return jsonify({"ok": True})
+
+
+# ---------------- 作品库容量管理 ----------------
+CLEANUP_KEEP_DAYS = 7  # 清理固定保护最近 7 天的非星标作品，防止误删
+
+
+def _video_group(name):
+    b = os.path.basename(name)
+    if b.startswith("merged_"):
+        return "merged", "拼接 / 合集"
+    if b.endswith("_rife_x2.mp4"):
+        return "rife_x2", "插帧+超分全链"
+    if b.endswith("_x2.mp4"):
+        return "x2", "AI 超分产物"
+    if b.endswith("_rife.mp4"):
+        return "rife", "插帧产物"
+    return "gen", "原始生成"
+
+
+def _storage_scan():
+    """返回 (groups 统计, star 统计, 全部文件信息列表)"""
+    files = glob.glob(os.path.join(OUTPUT, "*.mp4"))
+    groups, star = {}, {"n": 0, "gb": 0.0}
+    infos = []
+    for f in files:
+        try:
+            st = os.stat(f)
+        except OSError:
+            continue
+        key, label = _video_group(os.path.basename(f))
+        g = groups.setdefault(key, {"key": key, "label": label, "n": 0, "gb": 0.0})
+        g["n"] += 1
+        g["gb"] += st.st_size
+        is_star = bool(META["videos"].get(os.path.basename(f), {}).get("star"))
+        if is_star:
+            star["n"] += 1
+            star["gb"] += st.st_size
+        infos.append({"name": os.path.basename(f), "size": st.st_size, "mtime": st.st_mtime,
+                      "group": key, "star": is_star})
+    for g in groups.values():
+        g["gb"] = round(g["gb"] / 1024 ** 3, 2)
+    return list(groups.values()), star, infos
+
+
+@app.route("/api/storage")
+def storage():
+    with LOCK:
+        groups, star, infos = _storage_scan()
+    total_gb = round(sum(g["gb"] for g in groups), 2)
+    try:
+        free_gb = round(shutil.disk_usage(OUTPUT).free / 1024 ** 3, 1)
+    except Exception:
+        free_gb = None
+    return jsonify({"ok": True, "groups": sorted(groups, key=lambda g: -g["gb"]),
+                    "total_gb": total_gb, "total_n": len(infos),
+                    "star_n": star["n"], "star_gb": round(star["gb"] / 1024 ** 3, 2),
+                    "disk_free_gb": free_gb, "keep_days": CLEANUP_KEEP_DAYS})
+
+
+def _cleanup_candidates(infos):
+    cutoff = time.time() - CLEANUP_KEEP_DAYS * 86400
+    return [f for f in infos if not f["star"] and f["mtime"] < cutoff]
+
+
+@app.route("/api/videos/cleanup/preview")
+def cleanup_preview():
+    with LOCK:
+        groups, star, infos = _storage_scan()
+    cands = _cleanup_candidates(infos)
+    return jsonify({"ok": True, "count": len(cands),
+                    "gb": round(sum(f["size"] for f in cands) / 1024 ** 3, 2),
+                    "samples": [f["name"] for f in cands[:5]]})
+
+
+@app.route("/api/videos/cleanup", methods=["POST"])
+def cleanup_exec():
+    with LOCK:
+        groups, star, infos = _storage_scan()
+    cands = _cleanup_candidates(infos)
+    deleted, freed = 0, 0
+    for f in cands:
+        try:
+            os.remove(os.path.join(OUTPUT, f["name"]))
+            with LOCK:
+                META["videos"].pop(f["name"], None)
+            deleted += 1
+            freed += f["size"]
+        except OSError:
+            continue
+    with LOCK:
+        _save_meta()
+    return jsonify({"ok": True, "deleted": deleted, "freed_gb": round(freed / 1024 ** 3, 2)})
 
 
 # ---------------- 后处理：RIFE 插帧 ×2 / Real-ESRGAN 超分 ×2 ----------------
@@ -1110,6 +1258,7 @@ def videos():
                     "sampler": m.get("sampler"), "scheduler": m.get("scheduler"), "crop": m.get("crop"),
                     "gen_seconds": m.get("gen_seconds"), "end_frame": m.get("end_frame"),
                     "model": m.get("model"), "model_label": m.get("model_label"),
+                    "lora": m.get("lora"), "lora_label": m.get("lora_label"),
                     "postproc": m.get("postproc"), "src": m.get("src"),
                     "merged": m.get("merged"), "segments": m.get("segments"), "star": m.get("star")})
     return jsonify(out)
@@ -1159,39 +1308,24 @@ def lastframe(name):
             pass
 
 
-@app.route("/api/concat", methods=["POST"])
-def concat():
-    """把多段视频按顺序拼成一条；分辨率一致时无损 copy，否则统一转码"""
-    names = (request.json or {}).get("names") or []
-    if not (2 <= len(names) <= 8):
-        return jsonify({"ok": False, "error": "请选择 2-8 段视频"})
-    paths, dims = [], []
-    for n in names:
-        n = os.path.basename(n)
-        p = os.path.join(OUTPUT, n)
-        if not os.path.isfile(p):
-            return jsonify({"ok": False, "error": f"文件不存在: {n}"})
-        out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "v:0",
-                              "-show_entries", "stream=width,height", "-of", "csv=p=0", p],
-                             capture_output=True, text=True, timeout=10)
+def _concat_files(paths, out_path):
+    """拼接 mp4 到 out_path：分辨率一致无损 copy，否则统一转码。返回 (ok, 错误信息或首段尺寸)"""
+    dims = []
+    for p in paths:
         try:
+            out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "v:0",
+                                  "-show_entries", "stream=width,height", "-of", "csv=p=0", p],
+                                 capture_output=True, text=True, timeout=10)
             w, h = [int(x) for x in out.stdout.strip().split(",")]
+            dims.append((w, h))
         except Exception:
-            return jsonify({"ok": False, "error": f"无法解析视频: {n}"})
-        paths.append(p)
-        dims.append((w, h))
-    # 输出文件名递增
-    idx = 1
-    while os.path.exists(os.path.join(OUTPUT, f"merged_{idx:04d}.mp4")):
-        idx += 1
-    out_name = f"merged_{idx:04d}.mp4"
-    out_path = os.path.join(OUTPUT, out_name)
+            return False, f"无法解析视频: {os.path.basename(p)}"
+    same = len(set(dims)) == 1
     fd, lst = tempfile.mkstemp(suffix=".txt")
     os.close(fd)
     with open(lst, "w") as f:
         for p in paths:
             f.write(f"file '{p}'\n")
-    same = len(set(dims)) == 1
     try:
         if same:
             cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
@@ -1200,20 +1334,44 @@ def concat():
             w0, h0 = dims[0]
             vf = f"scale={w0}:{h0}:force_original_aspect_ratio=decrease,pad={w0}:{h0}:(ow-iw)/2:(oh-ih)/2"
             cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
-                   "-i", lst, "-vf", vf, "-r", "24", "-c:v", "libx264", "-crf", "19",
-                   "-preset", "veryfast", "-c:a", "aac", "-b:a", "192k", out_path]
-        r = subprocess.run(cmd, timeout=600)
+                   "-i", lst, "-vf", vf, "-r", "24",
+                   "-c:v", "libx264", "-crf", "19", "-preset", "veryfast",
+                   "-c:a", "aac", "-b:a", "192k", out_path]
+        r = subprocess.run(cmd, timeout=1800)
         if r.returncode != 0 or not os.path.isfile(out_path):
-            return jsonify({"ok": False, "error": "拼接失败"})
+            return False, "拼接失败"
     finally:
         try:
             os.unlink(lst)
-        except Exception:
+        except OSError:
             pass
-    dur = _probe_duration(out_path)
+    return True, dims[0] if dims else None
+
+
+@app.route("/api/concat", methods=["POST"])
+def concat():
+    """把多段视频按顺序拼成一条；分辨率一致时无损 copy，否则统一转码"""
+    names = (request.json or {}).get("names") or []
+    if not (2 <= len(names) <= 8):
+        return jsonify({"ok": False, "error": "请选择 2-8 段视频"})
+    paths = []
+    for n in names:
+        n = os.path.basename(n)
+        p = os.path.join(OUTPUT, n)
+        if not os.path.isfile(p):
+            return jsonify({"ok": False, "error": f"文件不存在: {n}"})
+        paths.append(p)
+    idx = 1
+    while os.path.exists(os.path.join(OUTPUT, f"merged_{idx:04d}.mp4")):
+        idx += 1
+    out_name = f"merged_{idx:04d}.mp4"
+    ok, info = _concat_files(paths, os.path.join(OUTPUT, out_name))
+    if not ok:
+        return jsonify({"ok": False, "error": info})
+    dur = _probe_duration(os.path.join(OUTPUT, out_name))
     with LOCK:
         META["videos"][out_name] = {"prompt": "（拼接 " + str(len(paths)) + " 段长片）", "seed": None,
-                                    "width": dims[0][0], "height": dims[0][1],
+                                    "width": info[0], "height": info[1],
                                     "length": None, "duration": dur, "merged": True,
                                     "segments": [os.path.basename(p) for p in paths],
                                     "time": int(time.time())}
@@ -1424,7 +1582,7 @@ def _last_frame_upload(video_name):
 
 
 def _record_meta(video_name, prompt, w, h, length, steps, turbo, i2v, seg, chain_id, gen_seconds=None,
-                 model=None, model_label=None):
+                 model=None, model_label=None, lora=None, lora_label=None):
     with LOCK:
         META["videos"][video_name] = {
             "prompt": prompt, "seed": None, "width": w, "height": h,
@@ -1432,6 +1590,7 @@ def _record_meta(video_name, prompt, w, h, length, steps, turbo, i2v, seg, chain
             "duration": _probe_duration(os.path.join(OUTPUT, video_name)),
             "gen_seconds": gen_seconds,
             "model": model, "model_label": model_label,
+            "lora": lora, "lora_label": lora_label,
             "chain": chain_id, "segment": seg, "time": int(time.time()),
         }
         _save_meta()
@@ -1450,7 +1609,7 @@ def run_auto_job(job_id, p):
             actual_seed = (p["seed"] + i) if p["seed"] else random.randint(1, 2 ** 31 - 1)
             wf = build_workflow(p["prompt"], p["width"], p["height"], p["length"], actual_seed,
                                 p["steps"], prev_image, None, p["turbo"], p["sampler"], p["scheduler"],
-                                {"filename": p["model"], "kind": p["model_kind"]})
+                                {"filename": p["model"], "kind": p["model_kind"]}, p.get("lora") or None)
             try:
                 r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10).json()
             except Exception:
@@ -1477,7 +1636,8 @@ def run_auto_job(job_id, p):
             job["videos"].append(vid)
             _record_meta(vid, p["prompt"], p["width"], p["height"], p["length"], p["steps"],
                          p["turbo"], i > 0, i + 1, job_id, gen_seconds=round(time.time() - seg_t0),
-                         model=p.get("model"), model_label=p.get("model_label"))
+                         model=p.get("model"), model_label=p.get("model_label"),
+                         lora=p.get("lora"), lora_label=p.get("lora_label"))
             if i < job["total"] - 1:
                 job["phase"] = "extracting"
                 prev_image = _last_frame_upload(vid)
@@ -1548,12 +1708,20 @@ def autochain():
         return jsonify({"ok": False, "error": f"模型未安装：{prof['label']}"})
     if prof["needs_gguf"] and _gguf_ready() is not True:
         return jsonify({"ok": False, "error": "ComfyUI 未检出 GGUF 加载组件，无法使用 GGUF 模型"})
+    if prof.get("steps_fixed") and data.get("lora"):
+        return jsonify({"ok": False, "error": "加速版权重不能叠加 Turbo LoRA（自身已折叠加速），请二选一"})
+    try:
+        lora_fn, lora_steps, lora_label = _resolve_lora(data.get("lora"))
+    except LookupError as e:
+        return jsonify({"ok": False, "error": str(e)})
     p = {"prompt": prompt, "width": width, "height": height, "length": length,
-         "steps": int(prof["steps_fixed"]) if prof.get("steps_fixed") else max(4, min(20, int(data.get("steps", 8) or 8))),
+         "steps": lora_steps or (int(prof["steps_fixed"]) if prof.get("steps_fixed")
+                                 else max(4, min(20, int(data.get("steps", 8) or 8)))),
          "seed": int(data.get("seed", 0) or 0),
-         "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True),
+         "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True) and not lora_fn,
          "sampler": data.get("sampler") or "euler", "scheduler": data.get("scheduler") or "normal",
-         "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"]}
+         "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"],
+         "lora": lora_fn or "", "lora_label": lora_label or ""}
     job_id = f"chain_{int(time.time()*1000):x}"
     AUTO_JOBS[job_id] = {"total": total, "status": "starting", "params": {k: v for k, v in p.items()}}
     threading.Thread(target=run_auto_job, args=(job_id, p), daemon=True).start()
@@ -1579,7 +1747,7 @@ BATCH_LOCK = threading.Lock()
 _BATCH_LAST_ID = None
 BATCH_MAX_PROMPTS = 60
 BATCH_MAX_TASKS = 240
-PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110}  # 自动后处理单任务秒级估算
+PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110, "concat": 30}  # 自动后处理/拼接单任务秒级估算
 
 
 def _batch_save():
@@ -1641,15 +1809,54 @@ def _batch_autopost(video, p, failures, prompt, seed):
                          "error": f"成片已入库，自动处理失败：{str(e)[:150]}"})
 
 
-def _batch_submit_one(prompt, seed, p):
+def _upload_batch_image(b64, w, h, crop="center"):
+    """批量首帧图：按目标尺寸 cover 裁剪（全批统一尺寸，保证可无损拼接）后上传 ComfyUI"""
+    img = Image.open(io.BytesIO(base64.b64decode(b64.split(",")[-1]))).convert("RGB")
+    img = cover_resize(img, w, h, crop)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    r = requests.post(f"{COMFY}/upload/image",
+                      files={"image": ("panel_batch_i2v.png", buf.getvalue(), "image/png")}, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}")
+    return r.json()["name"]
+
+
+def _batch_submit_one(prompt, seed, p, image_name=None):
     wf = build_workflow(prompt, p["width"], p["height"], p["length"], seed, p["steps"],
-                        None, None, p["turbo"], p["sampler"], p["scheduler"],
-                        {"filename": p["model"], "kind": p["model_kind"]})
+                        image_name, None, p["turbo"], p["sampler"], p["scheduler"],
+                        {"filename": p["model"], "kind": p["model_kind"]}, p.get("lora") or None)
     r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
     res = r.json()
     if "prompt_id" not in res:
         raise RuntimeError(res.get("error", {}).get("message", "工作流校验失败"))
     return res["prompt_id"], wf["6"]["inputs"]["width"], wf["6"]["inputs"]["height"]
+
+
+def _batch_concat(job):
+    """批次收尾自动拼接合集（批量任务同尺寸，走无损 copy）"""
+    paths = [os.path.join(OUTPUT, v) for v in job["videos"] if os.path.isfile(os.path.join(OUTPUT, v))]
+    if len(paths) < 2:
+        return
+    idx = 1
+    while os.path.exists(os.path.join(OUTPUT, f"merged_{idx:04d}.mp4")):
+        idx += 1
+    out_name = f"merged_{idx:04d}.mp4"
+    ok, info = _concat_files(paths, os.path.join(OUTPUT, out_name))
+    if not ok:
+        job["failures"].append({"prompt": "自动拼接合集", "seed": None, "step": None, "error": info})
+        return
+    try:
+        dur = _probe_duration(os.path.join(OUTPUT, out_name))
+    except Exception:
+        dur = None
+    with LOCK:
+        META["videos"][out_name] = {"prompt": f"（通宵批次合集 {len(paths)} 段）", "seed": None,
+                                    "width": info[0] if info else None, "height": info[1] if info else None,
+                                    "length": None, "duration": dur, "merged": True, "batch": job["id"],
+                                    "segments": [os.path.basename(p) for p in paths], "time": int(time.time())}
+        _save_meta()
+    job["merged"] = out_name
 
 
 def run_batch_job(job_id):
@@ -1690,13 +1897,20 @@ def run_batch_job(job_id):
                 continue
             with BATCH_LOCK:
                 if not job["queue"]:
+                    if job["params"].get("auto_concat") and len(job["videos"]) >= 2 and not job.get("merged"):
+                        job["current"] = {"index": "·", "prompt": "自动拼接合集中…", "seed": None}
+                        _batch_concat(job)
                     job["status"] = "done"
                     job["current"] = None
                     break
-                prompt, seed = job["queue"][0]
+                entry = job["queue"][0]
+                prompt, seed = entry[0], entry[1]
+                img_idx = entry[2] if len(entry) > 2 else None
                 job["current"] = {"index": job["total"] - len(job["queue"]) + 1,
-                                  "prompt": prompt, "seed": seed}
+                                  "prompt": prompt, "seed": seed,
+                                  "i2v": img_idx is not None}
                 job["current_tid"] = None
+            image_name = job["img_names"].get(img_idx) if img_idx is not None else None
             # 提交（连接类异常 60s×30 重试；工作流校验失败属参数性问题，记失败即跳过）
             tid = w = h = None
             dead = False
@@ -1704,7 +1918,7 @@ def run_batch_job(job_id):
                 if job.get("cancel"):
                     break
                 try:
-                    tid, w, h = _batch_submit_one(prompt, seed, p)
+                    tid, w, h = _batch_submit_one(prompt, seed, p, image_name)
                     job["conn_retry"] = 0
                     break
                 except requests.RequestException:
@@ -1743,9 +1957,10 @@ def run_batch_job(job_id):
             if status == "done" and vid:
                 job["videos"].append(vid)
                 job["done"] += 1
-                _record_meta(vid, prompt, w, h, p["length"], p["steps"], p["turbo"], False,
-                             None, None, gen_seconds=round(time.time() - t0),
-                             model=p.get("model"), model_label=p.get("model_label"))
+                _record_meta(vid, prompt, w, h, p["length"], p["steps"], p["turbo"],
+                             bool(image_name), None, None, gen_seconds=round(time.time() - t0),
+                             model=p.get("model"), model_label=p.get("model_label"),
+                             lora=p.get("lora"), lora_label=p.get("lora_label"))
                 with LOCK:
                     META["videos"][vid]["batch"] = job_id
                     _save_meta()
@@ -1782,6 +1997,7 @@ def _batch_restore():
     job["resumed"] = True
     job["current"] = None
     job["pending_tid"] = job.get("current_tid")
+    job.setdefault("img_names", {})
     BATCH_JOBS[job["id"]] = job
     print(f"[panel] 恢复通宵批次 {job['id']}：剩余 {len(job.get('queue') or [])} 个任务")
     threading.Thread(target=run_batch_job, args=(job["id"],), daemon=True).start()
@@ -1817,21 +2033,43 @@ def batch_start():
         return jsonify({"ok": False, "error": f"模型未安装：{prof['label']}"})
     if prof["needs_gguf"] and _gguf_ready() is not True:
         return jsonify({"ok": False, "error": "ComfyUI 未检出 GGUF 加载组件，无法使用 GGUF 模型"})
+    if prof.get("steps_fixed") and data.get("lora"):
+        return jsonify({"ok": False, "error": "加速版权重不能叠加 Turbo LoRA（自身已折叠加速），请二选一"})
+    try:
+        lora_fn, lora_steps, lora_label = _resolve_lora(data.get("lora"))
+    except LookupError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    # 首帧图（可选）：第 i 张图对应第 i 行提示词；提交时即上传，避免 base64 随批次状态反复落盘
+    images = data.get("images_base64") or []
+    if not isinstance(images, list):
+        images = []
+    images = images[:len(prompts)]
+    img_names, img_errs = {}, []
+    for i, b64 in enumerate(images):
+        try:
+            img_names[i] = _upload_batch_image(b64, width, height)
+        except Exception as e:
+            img_errs.append(f"第 {i + 1} 张首帧图上传失败，对应行退化为文生视频：{str(e)[:100]}")
     p = {"per_prompt": per,
          "width": width, "height": height, "length": length,
-         "steps": int(prof["steps_fixed"]) if prof.get("steps_fixed") else max(4, min(20, int(data.get("steps", 8) or 8))),
-         "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True),
+         "steps": lora_steps or (int(prof["steps_fixed"]) if prof.get("steps_fixed")
+                                 else max(4, min(20, int(data.get("steps", 8) or 8)))),
+         "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True) and not lora_fn,
          "sampler": data.get("sampler") if data.get("sampler") in SAMPLERS else "euler",
          "scheduler": data.get("scheduler") if data.get("scheduler") in SCHEDS else "normal",
          "autopost": data.get("autopost") if data.get("autopost") in ("rife", "x2", "rife_x2") else "",
-         "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"]}
-    queue = [[prompt, random.randint(1, 2 ** 31 - 1)] for prompt in prompts for _ in range(per)]
-    per_sec = _estimate_seconds_per(p)
+         "auto_concat": bool(data.get("auto_concat", False)),
+         "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"],
+         "lora": lora_fn or "", "lora_label": lora_label or ""}
+    queue = [[prompt, random.randint(1, 2 ** 31 - 1), (i if i < len(images) else None)]
+             for i, prompt in enumerate(prompts) for _ in range(per)]
+    per_sec = _estimate_seconds_per(p) + (PP_EST.get("concat", 0) if p["auto_concat"] else 0)
     job_id = f"batch_{int(time.time() * 1000):x}"
     job = {"id": job_id, "status": "running", "created": int(time.time()),
            "prompts_total": len(prompts), "total": total,
            "done": 0, "failed": 0, "videos": [], "failures": [],
            "queue": queue, "current": None, "current_tid": None,
+           "img_names": img_names, "merged": None,
            "params": p, "eta_seconds_per": per_sec,
            "eta_end": int(time.time() + total * per_sec),
            "conn_retry": 0, "cancel": False, "error": ""}
@@ -1839,9 +2077,12 @@ def batch_start():
         BATCH_JOBS[job_id] = job
     global _BATCH_LAST_ID
     _BATCH_LAST_ID = job_id
+    for msg in img_errs:
+        job["failures"].append({"prompt": "首帧图上传", "seed": None, "step": None, "error": msg})
     _batch_save()
     threading.Thread(target=run_batch_job, args=(job_id,), daemon=True).start()
     return jsonify({"ok": True, "job_id": job_id, "total": total,
+                    "images_used": len(img_names),
                     "eta_seconds_per": per_sec, "eta_end": job["eta_end"]})
 
 
@@ -1861,6 +2102,7 @@ def batch_active():
         "videos": job.get("videos"), "failures": job.get("failures"),
         "current": job.get("current"), "conn_retry": job.get("conn_retry"),
         "eta_end": job.get("eta_end"), "eta_seconds_per": job.get("eta_seconds_per"),
+        "merged": job.get("merged"),
         "error": job.get("error"), "params": p}})
 
 

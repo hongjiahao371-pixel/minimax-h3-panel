@@ -31,6 +31,13 @@
   目录条目用 `"steps_fixed": N` + `"turbo_compat": false` 表达，面板自动强制
 - 新增目录条目：编辑 panel/models_catalog.json（filename/size_gb/urls 必填，urls 按顺序回退），
   重启面板生效；未登记的本地权重文件也会被扫描出来、以文件名兜底显示
+- **v7.0 Turbo LoRA**：LoRA 下载目标目录 = `comfy_models_dir` 的兄弟目录 `loras/`
+  （/volume2/comfyui/ComfyUI/models/loras，LoraLoaderModelOnly 从这里列文件）。
+  官方蒸馏 LoRA 与 TeaCache 互斥（选 LoRA 时工作流不挂节点 5）、步数锁定 4/8；
+  LoRA 对 int8_convrot 量化底模的兼容性待显卡回装实跑验证。批量首帧图用
+  `_upload_batch_image` 按批次画幅 cover 裁剪上传（全批同尺寸→合集可无损 copy 拼接）；
+  图片在批次受理时一次性上传（base64 不进 batch.json，避免每次落盘放大文件）。
+  清理策略硬编码：保留星标 + 最近 7 天（CLEANUP_KEEP_DAYS）
 - 2026-09-18 时点：**3080 显卡未装回**，comfyui.service 处于 CUDA 缺失崩溃循环（已手动 stop，
   enabled 保留——装回显卡后 `systemctl start comfyui` 即恢复）；生成类端到端验证待显卡回装后补
 - **v6.0 通宵批量**：批次状态持久化在 `panel/data/batch.json`（每任务落盘一次）；面板重启时

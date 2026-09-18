@@ -159,6 +159,38 @@
       ]
     },
     {
+      "id": "lora-turbo8",
+      "label": "Turbo LoRA · 8 步加速（官方）",
+      "filename": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "kind": "lora",
+      "size_gb": 1.82,
+      "lora_steps": 8,
+      "quality": "蒸馏加速，质量轻微让步",
+      "speed": "8 步出片，约 2 倍速",
+      "official": true,
+      "desc": "Comfy-Org 官方蒸馏加速 LoRA（1.8GB 小文件）。在「高级选项 → 加速 LoRA」选用后步数锁定 8 步，与加速缓存互斥。叠加在任意主模型上使用，不换大模型即可提速。",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+      ]
+    },
+    {
+      "id": "lora-turbo4",
+      "label": "Turbo LoRA · 4 步加速（官方）",
+      "filename": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+      "kind": "lora",
+      "size_gb": 1.82,
+      "lora_steps": 4,
+      "quality": "加速步数激进，建议先试样片",
+      "speed": "4 步出片，最快档",
+      "official": true,
+      "desc": "Comfy-Org 官方 4 步蒸馏 LoRA（1.8GB，768p 训练）。本面板三档画质均 ≤768p 可用。选用后步数锁定 4 步，出片速度最快，通宵批量产能优先时首选；画质请与 8 步对比评估。",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+      ]
+    },
+    {
       "id": "fasth3-4step",
       "label": "FastH3 4 步加速版（实验性）",
       "filename": "FastH3-comfy-Q4_K_M.gguf",
