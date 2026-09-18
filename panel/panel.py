@@ -1429,6 +1429,15 @@ def local_optimize(prompt, variant=0):
     return "，".join(parts)
 
 
+def _strip_think(text):
+    """剥掉推理模型（如 MiniMax-M3）回复里的 <think> 思考块"""
+    import re as _re
+    text = _re.sub(r"(?is)<think>.*?</think>", "", text)
+    if "<think>" in text and "</think>" in text:
+        text = text.split("</think>")[-1]
+    return text.strip()
+
+
 def llm_optimize(prompt, cfg, variant=0):
     """可选：调用 OpenAI 兼容接口，按 H3 的提示词规范优化"""
     sys_prompt = (
@@ -1448,10 +1457,10 @@ def llm_optimize(prompt, cfg, variant=0):
         json={"model": cfg.get("api_model") or "gpt-4o-mini",
               "messages": [{"role": "system", "content": sys_prompt},
                            {"role": "user", "content": prompt}],
-              "temperature": 0.7, "max_tokens": 300},
-        timeout=25)
+              "temperature": 0.7, "max_tokens": 3000},
+        timeout=60)
     r.raise_for_status()
-    text = r.json()["choices"][0]["message"]["content"].strip()
+    text = _strip_think(r.json()["choices"][0]["message"]["content"]).strip()
     text = text.strip(chr(34) + chr(39) + "“”‘’")
     if not text:
         raise ValueError("empty response")
@@ -1523,10 +1532,10 @@ def llm_split_prompts(text, cfg, count):
         json={"model": cfg.get("api_model") or "gpt-4o-mini",
               "messages": [{"role": "system", "content": sys_prompt},
                            {"role": "user", "content": text}],
-              "temperature": 0.5, "max_tokens": 1200},
-        timeout=40)
+              "temperature": 0.5, "max_tokens": 8000},
+        timeout=90)
     r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"]
+    content = _strip_think(r.json()["choices"][0]["message"]["content"])
     scenes = []
     for ln in content.splitlines():
         ln = ln.strip().lstrip("0123456789.、·-–—）) ：: ")
@@ -1566,9 +1575,9 @@ def split_prompts():
     cfg = _load_cfg()
     if cfg.get("api_base") and cfg.get("api_key"):
         try:
-            scenes = llm_split_prompts(text, cfg, count or max(2, min(8, len(text) // 80 or 2)))
+            raw = llm_split_prompts(text, cfg, count or max(2, min(8, len(text) // 80 or 2)))
             scenes, warns = [], []
-            for s in scenes:
+            for s in raw:
                 s2, w = _h3_prompt_guard(s)
                 scenes.append(s2)
                 warns.extend(w)
