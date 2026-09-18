@@ -10,5 +10,7 @@
   "postproc_home": "",
   "vram_budget_tokens": 115000000,
   "vram_warn_tokens": 95000000,
-  "access_password": ""
+  "access_password": "",
+  "comfy_models_dir": "/path/to/ComfyUI/models/diffusion_models",
+  "default_model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 }

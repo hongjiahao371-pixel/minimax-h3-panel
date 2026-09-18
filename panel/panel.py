@@ -46,6 +46,8 @@ def _load_panel_config():
         "vram_budget_tokens": int(pick("vram_budget_tokens", 115_000_000)),
         "vram_warn_tokens": int(pick("vram_warn_tokens", 95_000_000)),
         "access_password": str(pick("access_password", "") or ""),
+        "comfy_models_dir": _abs(pick("comfy_models_dir", "")),
+        "default_model": str(pick("default_model", "") or ""),
         "os.makedirs": data_dir,
     }
 
@@ -63,6 +65,28 @@ UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
 VAE_VID = "minimax_h3_video_vae_fp16.safetensors"
 VAE_AUD = "minimax_h3_audio_vae_fp32.safetensors"
+
+# ---------------- 模型库：社区衍生模型注册表 / 下载器 ----------------
+MODEL_EXTS = (".safetensors", ".gguf", ".sft")
+# ComfyUI 实际扫描的权重目录（UNETLoader / UnetLoaderGGUF 都从这里列文件）
+MODELS_DIR = CONFIG.get("comfy_models_dir") or os.path.join(
+    os.path.dirname(OUTPUT.rstrip(os.sep)), "models", "diffusion_models")
+DEFAULT_MODEL = CONFIG.get("default_model") or UNET
+CATALOG_FILE = os.path.join(BASE_DIR, "models_catalog.json")
+DL_FILE = os.path.join(CONFIG["data_dir"], "downloads.json")
+PANEL_CONFIG_PATH = os.environ.get("PANEL_CONFIG") or os.path.join(BASE_DIR, "config.json")
+
+
+def _load_catalog():
+    try:
+        with open(CATALOG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {m["filename"]: m for m in data.get("models", []) if m.get("filename")}
+    except Exception:
+        return {}
+
+
+CATALOG = _load_catalog()
 
 app = Flask(__name__)
 
@@ -106,11 +130,14 @@ def _meta_from_history(item):
         graph = item["prompt"][2]
         n6 = graph.get("6", {}).get("inputs", {})
         n8 = graph.get("8", {}).get("inputs", {})
+        n1 = graph.get("1", {}).get("inputs", {})
+        unet_fn = n1.get("unet_name") or UNET
         meta.update({"prompt": n6.get("prompt"), "width": n6.get("width"),
                      "height": n6.get("height"), "length": n6.get("length"),
                      "seed": n8.get("seed"), "steps": n8.get("steps"),
                      "sampler": n8.get("sampler_name"), "scheduler": n8.get("scheduler"),
-                     "turbo": "5" in graph, "i2v": "14" in graph, "end_frame": "15" in graph})
+                     "turbo": "5" in graph, "i2v": "14" in graph, "end_frame": "15" in graph,
+                     "model": unet_fn, "model_label": (CATALOG.get(unet_fn) or {}).get("label") or unet_fn})
     except Exception:
         pass
     return meta
@@ -188,12 +215,21 @@ def cover_resize(img, w, h, crop_pos="center"):
     return img.crop((l, t, l + w, t + h))
 
 
+def _unet_loader_node(model_profile):
+    """模型加载节点：safetensors 走 UNETLoader，GGUF 走 UnetLoaderGGUF（节点 id 恒为 "1"）"""
+    mp = model_profile or {}
+    fn = mp.get("filename") or UNET
+    if mp.get("kind") == "gguf":
+        return {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": fn}}
+    return {"class_type": "UNETLoader", "inputs": {"unet_name": fn, "weight_dtype": "default"}}
+
+
 def build_workflow(prompt, width, height, length, seed, steps, image_name=None, end_image_name=None,
-                   turbo=False, sampler="euler", scheduler="normal"):
+                   turbo=False, sampler="euler", scheduler="normal", model_profile=None):
     w = width // 32 * 32
     h = height // 32 * 32
     wf = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
+        "1": _unet_loader_node(model_profile),
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": CLIP, "type": "minimax", "device": "cpu"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_VID}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_AUD}},
@@ -320,6 +356,14 @@ def generate():
     sampler = data.get("sampler") if data.get("sampler") in SAMPLERS else "euler"
     scheduler = data.get("scheduler") if data.get("scheduler") in SCHEDS else "normal"
 
+    # 模型选择：默认用配置的默认模型；显式指定的必须在已安装列表里
+    prof = _model_profile(data.get("model"))
+    if data.get("model") and prof["filename"] != DEFAULT_MODEL and prof["filename"] not in _installed_models():
+        return jsonify({"ok": False, "error": f"模型未安装：{prof['label']}"})
+    if prof["needs_gguf"] and _gguf_ready() is not True:
+        return jsonify({"ok": False, "error": "ComfyUI 未检出 GGUF 加载组件（UnetLoaderGGUF），无法使用 GGUF 模型；"
+                                             "请先在 ComfyUI 安装 ComfyUI-GGUF 并重启"})
+
     def upload_b64_image(b64):
         img = Image.open(io.BytesIO(base64.b64decode(b64.split(",")[-1]))).convert("RGB")
         iw, ih = img.size
@@ -361,12 +405,16 @@ def generate():
                                  f"（token {tokens//10000}万 / 上限 {TOKEN_BUDGET//10000}万）"})
 
     tasks = []
+    steps_list = list(steps_list)
+    if prof.get("steps_fixed"):
+        steps_list = [int(prof["steps_fixed"])]  # 加速版权重折叠了 LoRA，步数锁定
+    turbo_eff = turbo and prof.get("turbo_compat", True)  # 与 TeaCache 互斥的权重自动关加速
     with LOCK:
         for stp in steps_list:
             for i in range(count):
                 actual_seed = (seed + i) if seed else random.randint(1, 2**31 - 1)
                 wf = build_workflow(prompt, use_w, use_h, length, actual_seed, stp,
-                                    image_name, end_image_name, turbo, sampler, scheduler)
+                                    image_name, end_image_name, turbo_eff, sampler, scheduler, prof)
                 try:
                     r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
                     res = r.json()
@@ -378,8 +426,9 @@ def generate():
                 tid = res["prompt_id"]
                 TASKS[tid] = {"prompt": prompt, "seed": actual_seed, "width": wf["6"]["inputs"]["width"],
                               "height": wf["6"]["inputs"]["height"], "length": length, "steps": stp,
-                              "turbo": turbo, "i2v": bool(image_name), "end_frame": bool(end_image_name),
+                              "turbo": turbo_eff, "i2v": bool(image_name), "end_frame": bool(end_image_name),
                               "sampler": sampler, "scheduler": scheduler, "crop": crop,
+                              "model": prof["filename"], "model_label": prof["label"],
                               "t0": time.time(), "time": int(time.time())}
                 tasks.append({"task_id": tid, "seed": actual_seed, "steps": stp})
                 threading.Thread(target=_watch_task, args=(tid,), daemon=True).start()
@@ -388,7 +437,8 @@ def generate():
     return jsonify({"ok": True, "tasks": tasks, "steps_list": steps_list,
                     "width": use_w if not image_name else TASKS[tasks[0]["task_id"]]["width"],
                     "height": use_h if not image_name else TASKS[tasks[0]["task_id"]]["height"],
-                    "length": length, "count": count, "turbo": turbo})
+                    "length": length, "count": count, "turbo": turbo_eff,
+                    "model": prof["filename"], "model_label": prof["label"]})
 
 
 def _finalize_task(tid, item):
@@ -516,7 +566,8 @@ def active():
     """前端刷新后恢复跟踪：返回仍在进行（6h 内提交）的任务及参数"""
     cutoff = time.time() - 6 * 3600
     with LOCK:
-        keys = ("prompt", "seed", "width", "height", "length", "steps", "turbo", "time")
+        keys = ("prompt", "seed", "width", "height", "length", "steps", "turbo", "time",
+                "model", "model_label")
         items = [{"task_id": tid, **{k: v.get(k) for k in keys}}
                  for tid, v in TASKS.items() if v.get("t0", 0) >= cutoff]
     return jsonify({"ok": True, "tasks": items})
@@ -553,7 +604,8 @@ def queue_view():
                           "prompt": m.get("prompt"), "seed": m.get("seed"),
                           "width": m.get("width"), "height": m.get("height"),
                           "length": m.get("length"), "steps": m.get("steps"),
-                          "turbo": m.get("turbo"), "cancel_req": bool(m.get("cancel_req"))})
+                          "turbo": m.get("turbo"), "model_label": m.get("model_label"),
+                          "cancel_req": bool(m.get("cancel_req"))})
     return jsonify({"ok": True, "items": items})
 
 
@@ -609,18 +661,288 @@ def stats():
         gs, w, h, ln, st = m.get("gen_seconds"), m.get("width"), m.get("height"), m.get("length"), m.get("steps")
         if not gs or not w or not h or not ln or m.get("merged") or m.get("chain") or m.get("postproc"):
             continue  # 拼接片/接龙段/后处理片不计入生成耗时分桶
-        key = f"{w}x{h}x{ln}x{st}x{1 if m.get('turbo') else 0}"
-        b = buckets.setdefault(key, {"w": w, "h": h, "len": ln, "steps": st,
+        mdl = m.get("model") or UNET  # 历史数据无模型字段 → 都是出厂基线
+        key = f"{w}x{h}x{ln}x{st}x{1 if m.get('turbo') else 0}x{mdl}"
+        b = buckets.setdefault(key, {"w": w, "h": h, "len": ln, "steps": st, "model": mdl,
                                      "turbo": bool(m.get("turbo")), "n": 0, "total": 0})
         b["n"] += 1
         b["total"] += gs
     out = [{"w": b["w"], "h": b["h"], "len": b["len"], "steps": b["steps"],
-            "turbo": b["turbo"], "n": b["n"], "avg": round(b["total"] / b["n"])}
+            "turbo": b["turbo"], "model": b["model"], "n": b["n"], "avg": round(b["total"] / b["n"])}
            for b in buckets.values()]
     oom = [f.get("tokens") for f in failures
            if f.get("tokens") and ("OOM" in (f.get("error") or "") or "out of memory" in (f.get("error") or "").lower())]
     return jsonify({"ok": True, "buckets": out,
                     "oom_tokens_max": max(oom) if oom else None})
+
+
+# ---------------- 模型库：已装扫描 / 显存适配推荐 / 后台下载 / 选用 ----------------
+_DL_LOCK = threading.Lock()
+DL = {"active": None}  # {id,filename,label,size_gb,kind,status,downloaded,total,speed,eta_s,started,cancel,error}
+_HW_CACHE = {"t": 0, "data": None}
+_GGUF_CACHE = {"t": 0, "value": None}
+
+
+def _dl_restore():
+    """面板重启后恢复下载状态：进行中的标记为中断（.part 仍在，支持断点续传）"""
+    try:
+        with open(DL_FILE, encoding="utf-8") as f:
+            st = json.load(f).get("active")
+        if st and st.get("status") in ("downloading", "starting"):
+            st["status"] = "interrupted"
+            st["error"] = "面板重启导致下载中断，重新点下载即可续传"
+        DL["active"] = st
+    except Exception:
+        DL["active"] = None
+
+
+def _dl_save():
+    try:
+        tmp = DL_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"active": DL.get("active")}, f, ensure_ascii=False)
+        os.replace(tmp, DL_FILE)
+    except Exception:
+        pass
+
+
+def _installed_models():
+    try:
+        return [fn for fn in sorted(os.listdir(MODELS_DIR))
+                if not fn.startswith(".") and not fn.endswith((".part", ".tmp"))
+                and fn.lower().endswith(MODEL_EXTS) and os.path.isfile(os.path.join(MODELS_DIR, fn))]
+    except OSError:
+        return []
+
+
+def _model_profile(name):
+    """生成请求里的模型名 → 工作流档案；空/未知回落默认模型"""
+    fn = os.path.basename(str(name or "")) or DEFAULT_MODEL
+    e = CATALOG.get(fn) or {}
+    kind = e.get("kind") or ("gguf" if fn.lower().endswith(".gguf") else "safetensors")
+    return {"filename": fn, "label": e.get("label") or fn, "kind": kind,
+            "steps_fixed": e.get("steps_fixed"), "turbo_compat": e.get("turbo_compat", True),
+            "needs_gguf": kind == "gguf"}
+
+
+def _hardware():
+    """GPU/显存/内存（缓存 30s，ComfyUI 离线时返回 online=False）"""
+    if time.time() - _HW_CACHE["t"] < 30 and _HW_CACHE["data"]:
+        return _HW_CACHE["data"]
+    try:
+        d = requests.get(f"{COMFY}/system_stats", timeout=4).json()
+        dev = (d.get("devices") or [{}])[0]
+        data = {"gpu": dev.get("name") or "未知", "vram_gb": round((dev.get("vram_total") or 0) / 1024 ** 3, 1),
+                "ram_gb": round(((d.get("system", {}) or {}).get("ram_total") or 0) / 1024 ** 3, 1), "online": True}
+    except Exception:
+        data = {"gpu": None, "vram_gb": None, "ram_gb": None, "online": False}
+    _HW_CACHE.update({"t": time.time(), "data": data})
+    return data
+
+
+def _gguf_ready():
+    """ComfyUI 是否装有 GGUF 加载节点（True/False 缓存 5 分钟；离线返回 None 不缓存）"""
+    if time.time() - _GGUF_CACHE["t"] < 300 and _GGUF_CACHE["value"] is not None:
+        return _GGUF_CACHE["value"]
+    try:
+        ok = requests.get(f"{COMFY}/object_info/UnetLoaderGGUF", timeout=4).status_code == 200
+    except Exception:
+        return None
+    _GGUF_CACHE.update({"t": time.time(), "value": ok})
+    return ok
+
+
+def _rec_tier(size_gb, vram_gb):
+    """按 体积 vs 显存 给适配档位：fit=可常驻 / stream=流式加载 / heavy=不建议"""
+    if not size_gb or not vram_gb:
+        return None, "显存未知（ComfyUI 离线），无法评估适配"
+    if size_gb <= vram_gb * 1.05:
+        return "fit", f"约 {size_gb}GB ≤ 显存 {vram_gb}GB，权重可常驻显存，速度最优"
+    if size_gb <= vram_gb * 2.2:
+        return "stream", f"约 {size_gb}GB 大于显存 {vram_gb}GB，权重流式加载，速度受磁盘读取影响"
+    return "heavy", f"约 {size_gb}GB 远超显存 {vram_gb}GB，本机使用大概率频繁换页，不建议"
+
+
+def _download_worker(entry):
+    a = DL.get("active") or {}
+    fn = entry["filename"]
+    final = os.path.join(MODELS_DIR, fn)
+    part = final + ".part"
+    a.update({"status": "downloading", "error": "",
+              "downloaded": os.path.getsize(part) if os.path.isfile(part) else 0,
+              "total": int(round((entry.get("size_gb") or 0) * 1024 ** 3)) or None,
+              "speed": 0, "eta_s": None})
+    _dl_save()
+    last_save = 0.0
+    for url in entry.get("urls") or []:
+        headers = {"User-Agent": "h3-panel/5.0"}
+        if a["downloaded"]:
+            headers["Range"] = f"bytes={a['downloaded']}-"
+        try:
+            with requests.get(url, headers=headers, stream=True, timeout=(10, 60), allow_redirects=True) as r:
+                if r.status_code not in (200, 206):
+                    a["error"] = f"{url.split('/')[2]} 返回 HTTP {r.status_code}"
+                    continue
+                if r.status_code == 200:
+                    a["downloaded"] = 0  # 源不支持续传，重头下
+                ct = r.headers.get("Content-Length")
+                if ct:
+                    a["total"] = int(ct) + (a["downloaded"] if r.status_code == 206 else 0)
+                t0, b0 = time.time(), a["downloaded"]
+                with open(part, "ab" if r.status_code == 206 else "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if a.get("cancel"):
+                            a.update({"status": "cancelled", "speed": 0, "eta_s": None,
+                                      "error": "已取消，已下载部分已清理"})
+                            try:
+                                os.remove(part)
+                            except OSError:
+                                pass
+                            _dl_save()
+                            return
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        a["downloaded"] += len(chunk)
+                        now = time.time()
+                        if now - t0 >= 1:
+                            a["speed"] = round((a["downloaded"] - b0) / (now - t0), 0)
+                            a["eta_s"] = int((a["total"] - a["downloaded"]) / a["speed"]) \
+                                if a.get("total") and a.get("speed") else None
+                        if now - last_save >= 2:
+                            _dl_save()
+                            last_save = now
+            os.replace(part, final)  # 同目录原子改名：下载完成即刻对 ComfyUI 可见
+            a.update({"status": "done", "speed": 0, "eta_s": None, "error": ""})
+            _dl_save()
+            return
+        except Exception as e:
+            a["error"] = str(e)[:200]
+            continue
+    a.update({"status": "error", "speed": 0, "eta_s": None,
+              "error": a.get("error") or "所有下载源均失败"})
+    _dl_save()
+
+
+def _model_entry_view(fn, hw):
+    e = dict(CATALOG.get(fn) or {})
+    e.setdefault("id", fn)
+    e.setdefault("label", fn)
+    e.setdefault("kind", "gguf" if fn.lower().endswith(".gguf") else "safetensors")
+    e.setdefault("desc", "本地已安装的模型文件（未在内置目录登记）")
+    e["filename"] = fn
+    try:
+        e["size_gb"] = round(os.path.getsize(os.path.join(MODELS_DIR, fn)) / 1024 ** 3, 2)
+    except OSError:
+        pass
+    tier, note = _rec_tier(e.get("size_gb"), hw.get("vram_gb"))
+    e.update({"rec": tier, "rec_note": note})
+    return e
+
+
+@app.route("/api/models")
+def models_info():
+    hw = _hardware()
+    inst = _installed_models()
+    act = DL.get("active")
+    items = []
+    for fn in inst:
+        e = _model_entry_view(fn, hw)
+        e.update({"installed": True, "is_default": fn == DEFAULT_MODEL,
+                  "downloading": bool(act and act.get("filename") == fn and act.get("status") == "downloading")})
+        items.append(e)
+    known = {i["filename"] for i in items}
+    avail = []
+    gguf_ok = _gguf_ready()
+    for fn, raw in CATALOG.items():
+        if fn in known:
+            continue
+        e = dict(raw)
+        tier, note = _rec_tier(e.get("size_gb"), hw.get("vram_gb"))
+        e.update({"installed": False, "is_default": False, "rec": tier, "rec_note": note,
+                  "need_gguf": e.get("kind") == "gguf" and gguf_ok is False})
+        avail.append(e)
+    return jsonify({"ok": True, "models_dir": MODELS_DIR, "default_model": DEFAULT_MODEL,
+                    "hardware": hw, "gguf_ready": gguf_ok,
+                    "installed": items, "available": avail, "download": act})
+
+
+@app.route("/api/models/download", methods=["POST"])
+def models_download():
+    fn = os.path.basename((request.json or {}).get("filename") or "")
+    entry = CATALOG.get(fn)
+    if not entry or not entry.get("filename"):
+        return jsonify({"ok": False, "error": "内置目录中没有这个模型"})
+    with _DL_LOCK:
+        act = DL.get("active")
+        if act and act.get("status") in ("downloading", "starting"):
+            return jsonify({"ok": False, "error": f"已有下载任务在进行：{act.get('label')}"})
+        if fn in _installed_models():
+            return jsonify({"ok": False, "error": "该模型已安装，无需重复下载"})
+        need = int(round((entry.get("size_gb") or 0) * 1024 ** 3))
+        if need:
+            try:
+                free = shutil.disk_usage(MODELS_DIR).free
+            except Exception:
+                free = None
+            if free is not None and free < need * 1.05:
+                return jsonify({"ok": False, "error": f"磁盘空间不足：需约 {entry['size_gb']}GB，"
+                                                      f"目标盘仅剩 {free // 1024 ** 3}GB"})
+        st = {"id": entry.get("id") or fn, "filename": fn, "label": entry.get("label") or fn,
+              "size_gb": entry.get("size_gb"), "kind": entry.get("kind"), "status": "starting",
+              "downloaded": 0, "total": None, "speed": 0, "eta_s": None,
+              "started": int(time.time()), "cancel": False, "error": ""}
+        DL["active"] = st
+        _dl_save()
+    threading.Thread(target=_download_worker, args=(entry,), daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/models/download/cancel", methods=["POST"])
+def models_download_cancel():
+    act = DL.get("active")
+    if not act or act.get("status") not in ("downloading", "starting"):
+        return jsonify({"ok": False, "error": "没有进行中的下载"})
+    act["cancel"] = True
+    return jsonify({"ok": True})
+
+
+@app.route("/api/models/default", methods=["POST"])
+def models_default():
+    global DEFAULT_MODEL
+    fn = os.path.basename((request.json or {}).get("filename") or "")
+    if fn not in _installed_models():
+        return jsonify({"ok": False, "error": "模型未安装，不能设为默认"})
+    DEFAULT_MODEL = fn
+    try:
+        with open(PANEL_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+        cfg["default_model"] = fn
+        tmp = PANEL_CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, PANEL_CONFIG_PATH)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"写入配置失败: {e}"})
+    return jsonify({"ok": True, "default_model": fn})
+
+
+@app.route("/api/models/<path:fn>", methods=["DELETE"])
+def models_delete(fn):
+    fn = os.path.basename(fn)
+    path = os.path.join(MODELS_DIR, fn)
+    if not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "文件不存在"})
+    if fn == DEFAULT_MODEL:
+        return jsonify({"ok": False, "error": "默认模型不可删除；请先把其他模型设为默认"})
+    act = DL.get("active")
+    if act and act.get("filename") == fn and act.get("status") == "downloading":
+        return jsonify({"ok": False, "error": "该模型正在下载中，先取消下载"})
+    try:
+        os.remove(path)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+    return jsonify({"ok": True})
 
 
 # ---------------- 后处理：RIFE 插帧 ×2 / Real-ESRGAN 超分 ×2 ----------------
@@ -710,6 +1032,7 @@ def _pp_run(name, mode, out_path):
             "width": w, "height": h, "length": sm.get("length"),
             "steps": sm.get("steps"), "turbo": sm.get("turbo"), "i2v": sm.get("i2v"),
             "sampler": sm.get("sampler"), "scheduler": sm.get("scheduler"),
+            "model": sm.get("model"), "model_label": sm.get("model_label"),
             "duration": _probe_duration(out_path), "postproc": mode, "src": name,
             "gen_seconds": info.get("proc_seconds"), "time": int(time.time()),
         }
@@ -786,6 +1109,7 @@ def videos():
                     "steps": m.get("steps"), "turbo": m.get("turbo"), "i2v": m.get("i2v"),
                     "sampler": m.get("sampler"), "scheduler": m.get("scheduler"), "crop": m.get("crop"),
                     "gen_seconds": m.get("gen_seconds"), "end_frame": m.get("end_frame"),
+                    "model": m.get("model"), "model_label": m.get("model_label"),
                     "postproc": m.get("postproc"), "src": m.get("src"),
                     "merged": m.get("merged"), "segments": m.get("segments"), "star": m.get("star")})
     return jsonify(out)
@@ -1099,13 +1423,15 @@ def _last_frame_upload(video_name):
     return None
 
 
-def _record_meta(video_name, prompt, w, h, length, steps, turbo, i2v, seg, chain_id, gen_seconds=None):
+def _record_meta(video_name, prompt, w, h, length, steps, turbo, i2v, seg, chain_id, gen_seconds=None,
+                 model=None, model_label=None):
     with LOCK:
         META["videos"][video_name] = {
             "prompt": prompt, "seed": None, "width": w, "height": h,
             "length": length, "steps": steps, "turbo": turbo, "i2v": i2v,
             "duration": _probe_duration(os.path.join(OUTPUT, video_name)),
             "gen_seconds": gen_seconds,
+            "model": model, "model_label": model_label,
             "chain": chain_id, "segment": seg, "time": int(time.time()),
         }
         _save_meta()
@@ -1123,7 +1449,8 @@ def run_auto_job(job_id, p):
                 return
             actual_seed = (p["seed"] + i) if p["seed"] else random.randint(1, 2 ** 31 - 1)
             wf = build_workflow(p["prompt"], p["width"], p["height"], p["length"], actual_seed,
-                                p["steps"], prev_image, None, p["turbo"], p["sampler"], p["scheduler"])
+                                p["steps"], prev_image, None, p["turbo"], p["sampler"], p["scheduler"],
+                                {"filename": p["model"], "kind": p["model_kind"]})
             try:
                 r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10).json()
             except Exception:
@@ -1149,7 +1476,8 @@ def run_auto_job(job_id, p):
                 return
             job["videos"].append(vid)
             _record_meta(vid, p["prompt"], p["width"], p["height"], p["length"], p["steps"],
-                         p["turbo"], i > 0, i + 1, job_id, gen_seconds=round(time.time() - seg_t0))
+                         p["turbo"], i > 0, i + 1, job_id, gen_seconds=round(time.time() - seg_t0),
+                         model=p.get("model"), model_label=p.get("model_label"))
             if i < job["total"] - 1:
                 job["phase"] = "extracting"
                 prev_image = _last_frame_upload(vid)
@@ -1214,10 +1542,18 @@ def autochain():
         return jsonify({"ok": False, "over_budget": True,
                         "error": f"单段组合（{width}×{height} · {length}帧≈{length//24}秒）超出显存预算，长片无法生成。"
                                  f"请降低每段时长或画质档位。"})
+    # 长片接龙同样支持模型选择（含加速版的步数锁定 / TeaCache 互斥）
+    prof = _model_profile(data.get("model"))
+    if data.get("model") and prof["filename"] != DEFAULT_MODEL and prof["filename"] not in _installed_models():
+        return jsonify({"ok": False, "error": f"模型未安装：{prof['label']}"})
+    if prof["needs_gguf"] and _gguf_ready() is not True:
+        return jsonify({"ok": False, "error": "ComfyUI 未检出 GGUF 加载组件，无法使用 GGUF 模型"})
     p = {"prompt": prompt, "width": width, "height": height, "length": length,
-         "steps": max(4, min(20, int(data.get("steps", 8) or 8))),
-         "seed": int(data.get("seed", 0) or 0), "turbo": bool(data.get("turbo", True)),
-         "sampler": data.get("sampler") or "euler", "scheduler": data.get("scheduler") or "normal"}
+         "steps": int(prof["steps_fixed"]) if prof.get("steps_fixed") else max(4, min(20, int(data.get("steps", 8) or 8))),
+         "seed": int(data.get("seed", 0) or 0),
+         "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True),
+         "sampler": data.get("sampler") or "euler", "scheduler": data.get("scheduler") or "normal",
+         "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"]}
     job_id = f"chain_{int(time.time()*1000):x}"
     AUTO_JOBS[job_id] = {"total": total, "status": "starting", "params": {k: v for k, v in p.items()}}
     threading.Thread(target=run_auto_job, args=(job_id, p), daemon=True).start()
@@ -1240,7 +1576,9 @@ if __name__ == "__main__":
     # 重启后遗留的未完成任务：补挂后台 watcher 自动收尾入库
     for _tid in list(TASKS):
         threading.Thread(target=_watch_task, args=(_tid,), daemon=True).start()
+    _dl_restore()
     print(f"[panel] http://0.0.0.0:{CONFIG['port']}  ComfyUI={COMFY}  output={OUTPUT}")
+    print(f"[panel] 模型库目录={MODELS_DIR}  默认模型={DEFAULT_MODEL}  目录条目={len(CATALOG)} 个")
     if not CONFIG["access_password"]:
         print("[panel] 未设置访问口令（config.access_password），面板为无鉴权模式，请勿直接暴露公网")
     app.run(host="0.0.0.0", port=CONFIG["port"])

@@ -15,6 +15,25 @@
 - TeaCache 加速：custom_nodes/ComfyUI-MiniMaxH3-Cache 是作者针对 ComfyUI 0.32.0 重写的整模型级
   TeaCache 实现（官方版本按新内核 API 写、在 0.32.0 会崩），升级 ComfyUI 时注意别覆盖
 
+## v5.0 模型库相关
+
+- **模型目录的真实布局（重要）**：`ComfyUI/models/diffusion_models/` 是真实目录，里面是
+  指向 `/volume2/comfyui/models/diffusion_models/` 权重仓的**逐文件符号链接**（8/12 建环境时手工链的）。
+  直接往权重仓放新文件 ComfyUI 看不到——必须放进 ComfyUI 扫描目录本身。面板 config 的
+  `comfy_models_dir` 配的就是 `/volume2/comfyui/ComfyUI/models/diffusion_models`，
+  下载器直接把文件下到这里（.part 临时名 → 完成后同目录原子改名）
+- **GGUF 支持**：`bash deploy/install_gguf_node.sh` 一键装（city96/ComfyUI-GGUF 经 ghproxy clone +
+  pypi 装 gguf 包到用户目录）。已实测与 ComfyUI 0.32.0 兼容；它的 `unet_gguf` 键映射到
+  diffusion_models + unet 两个目录，.gguf 与 .safetensors 同目录混放即可
+- **GGUF 与 TeaCache**：MiniMaxH3Cache 会 clone 模型并断言 `MiniMaxH3Model` 类。GGUF 加载后能否
+  过断言需实测；不行就在 models_catalog.json 对应条目加 `"turbo_compat": false`（面板会自动跳过缓存节点）
+- **加速折叠版权重**（FastH3 4 步 / PDD 8 步等）：步数是固定的，且不能再叠 TeaCache。
+  目录条目用 `"steps_fixed": N` + `"turbo_compat": false` 表达，面板自动强制
+- 新增目录条目：编辑 panel/models_catalog.json（filename/size_gb/urls 必填，urls 按顺序回退），
+  重启面板生效；未登记的本地权重文件也会被扫描出来、以文件名兜底显示
+- 2026-09-18 时点：**3080 显卡未装回**，comfyui.service 处于 CUDA 缺失崩溃循环（已手动 stop，
+  enabled 保留——装回显卡后 `systemctl start comfyui` 即恢复）；生成类端到端验证待显卡回装后补
+
 ## 本机 config.json（对应作者环境）
 
 ```json

@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "note": "MiniMax-H3 社区衍生模型目录（仅收录与本面板 FL2VA 工作流兼容的变体）。size_gb 用于下载预检与显存适配推荐；urls 按顺序回退（hf-mirror 为主，直连 huggingface 为备）。新增条目后重启面板生效。",
+  "models": [
+    {
+      "id": "int8-convrot-pruned",
+      "label": "INT8 ConvRot 剪枝版（官方基线）",
+      "filename": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "kind": "safetensors",
+      "size_gb": 19.53,
+      "quality": "基准（最稳）",
+      "speed": "基准",
+      "official": true,
+      "desc": "Comfy-Org 官方发布：先剪枝 40% 再做 INT8 旋转量化。本面板的出厂默认模型，质量与稳定性的对照基准。",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+      ]
+    },
+    {
+      "id": "fp8-scaled-pruned",
+      "label": "FP8 Scaled 剪枝版（官方）",
+      "filename": "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
+      "kind": "safetensors",
+      "size_gb": 19.52,
+      "quality": "接近基准",
+      "speed": "与基准相当",
+      "official": true,
+      "desc": "Comfy-Org 官方 FP8(E4M3FN) 缩放量化。体积与 INT8 基本相同，量化思路不同；在 RTX 30 系上无算力加成，更多作为口味备选。",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors"
+      ]
+    },
+    {
+      "id": "nvfp4-pruned",
+      "label": "NVFP4 剪枝版（Abiray）",
+      "filename": "MiniMax_H3_FL2VA_pruned_nvfp4.safetensors",
+      "kind": "safetensors",
+      "size_gb": 11.67,
+      "quality": "轻微下降",
+      "speed": "小量化，加载快",
+      "desc": "4-bit 浮点(NVFP4) 量化，体积只有基线的六成。12GB 显存机型可接近全量常驻，减少流式加载等待，是画质/体积均衡的热门选择。",
+      "urls": [
+        "https://hf-mirror.com/Abiray/Minimax-H3-nvfp4-INT4-INT8-Convrot/resolve/main/MiniMax_H3_FL2VA_pruned_nvfp4.safetensors",
+        "https://huggingface.co/Abiray/Minimax-H3-nvfp4-INT4-INT8-Convrot/resolve/main/MiniMax_H3_FL2VA_pruned_nvfp4.safetensors"
+      ]
+    },
+    {
+      "id": "int4-convrot-pruned",
+      "label": "INT4 ConvRot 剪枝版（Merserk）",
+      "filename": "minimax_h3_fl2va_pruned_int4_convrot.safetensors",
+      "kind": "safetensors",
+      "size_gb": 10.56,
+      "quality": "可见下降",
+      "speed": "本目录最小的 safetensors",
+      "desc": "INT4 旋转量化，10.6GB——12GB 显存可完整常驻。追求最低占用/最快加载时选它，画质让步换速度。",
+      "urls": [
+        "https://hf-mirror.com/Merserk/MiniMax-H3-INT4-ConvRot/resolve/main/minimax_h3_fl2va_pruned_int4_convrot.safetensors",
+        "https://huggingface.co/Merserk/MiniMax-H3-INT4-ConvRot/resolve/main/minimax_h3_fl2va_pruned_int4_convrot.safetensors"
+      ]
+    },
+    {
+      "id": "w4a8-mixed-pruned",
+      "label": "W4A8 混合量化剪枝版（AX1Y2JP）",
+      "filename": "minimax_h3_fl2va_pruned_w4a8_mixed.safetensors",
+      "kind": "safetensors",
+      "size_gb": 11.68,
+      "quality": "轻微下降",
+      "speed": "4-bit 权重 + 8-bit 激活",
+      "desc": "权重 INT4、激活 INT8 的混合方案，Kijai 实验仓库同思路。体积与 NVFP4 相当，社区反馈运动连贯性保持较好。",
+      "urls": [
+        "https://hf-mirror.com/AX1Y2JP/MiniMax-H3-W4A8-ConvRot/resolve/main/minimax_h3_fl2va_pruned_w4a8_mixed.safetensors",
+        "https://huggingface.co/AX1Y2JP/MiniMax-H3-W4A8-ConvRot/resolve/main/minimax_h3_fl2va_pruned_w4a8_mixed.safetensors"
+      ]
+    },
+    {
+      "id": "int4bq-mixed-pruned",
+      "label": "INT4BQ 混合量化剪枝版（tsolful）",
+      "filename": "minimax_h3_fl2va_pruned_INT4BQ.safetensors",
+      "kind": "safetensors",
+      "size_gb": 14.81,
+      "quality": "介于 NVFP4 与 INT4 之间",
+      "speed": "中等体积",
+      "desc": "按层敏感度混合 INT4/INT8 的保守量化，比纯 INT4 多保住一些画质，体积介于两者之间。",
+      "urls": [
+        "https://hf-mirror.com/tsolful/Minimax_H3_INT4MixedConvRot/resolve/main/minimax_h3_fl2va_pruned_INT4BQ.safetensors",
+        "https://huggingface.co/tsolful/Minimax_H3_INT4MixedConvRot/resolve/main/minimax_h3_fl2va_pruned_INT4BQ.safetensors"
+      ]
+    },
+    {
+      "id": "gguf-q2k-pruned",
+      "label": "GGUF Q2_K 剪枝版（unsloth）",
+      "filename": "minimax_h3_fl2va_pruned-Q2_K.gguf",
+      "kind": "gguf",
+      "size_gb": 6.26,
+      "quality": "明显下降（极限压缩）",
+      "speed": "最轻量，加载最快",
+      "desc": "2-bit 极限量化，仅 6.3GB。适合尝鲜/测试流程/磁盘紧张场景；画质损失明显，正式出片不建议。",
+      "urls": [
+        "https://hf-mirror.com/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q2_K.gguf",
+        "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q2_K.gguf"
+      ]
+    },
+    {
+      "id": "gguf-q3k-pruned",
+      "label": "GGUF Q3_K 剪枝版（unsloth）",
+      "filename": "minimax_h3_fl2va_pruned-Q3_K.gguf",
+      "kind": "gguf",
+      "size_gb": 8.16,
+      "quality": "下降较多",
+      "speed": "轻量",
+      "desc": "3-bit 量化，8GB 出头。磁盘/显存极度紧张时的折中档。",
+      "urls": [
+        "https://hf-mirror.com/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q3_K.gguf",
+        "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q3_K.gguf"
+      ]
+    },
+    {
+      "id": "gguf-q4k-pruned",
+      "label": "GGUF Q4_K 剪枝版（unsloth）",
+      "filename": "minimax_h3_fl2va_pruned-Q4_K.gguf",
+      "kind": "gguf",
+      "size_gb": 10.64,
+      "quality": "接近 INT4 safetensors",
+      "speed": "GGUF 甜点档",
+      "desc": "4-bit GGUF 甜点档，10.6GB 与最小 safetensors 相当，社区使用最广泛的 GGUF 档位，12GB 显存可全量常驻。",
+      "urls": [
+        "https://hf-mirror.com/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q4_K.gguf",
+        "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q4_K.gguf"
+      ]
+    },
+    {
+      "id": "gguf-q5-pruned",
+      "label": "GGUF Q5_0 剪枝版（unsloth）",
+      "filename": "minimax_h3_fl2va_pruned-Q5_0.gguf",
+      "kind": "gguf",
+      "size_gb": 12.97,
+      "quality": "较好",
+      "speed": "中等体积",
+      "desc": "5-bit GGUF，13GB。比 Q4 多保留细节，体积仍明显小于基线。",
+      "urls": [
+        "https://hf-mirror.com/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q5_0.gguf",
+        "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q5_0.gguf"
+      ]
+    },
+    {
+      "id": "gguf-q8-pruned",
+      "label": "GGUF Q8_0 剪枝版（unsloth）",
+      "filename": "minimax_h3_fl2va_pruned-Q8_0.gguf",
+      "kind": "gguf",
+      "size_gb": 19.97,
+      "quality": "近无损",
+      "speed": "与基线相当",
+      "desc": "8-bit GGUF 近无损量化，体积与 INT8 基线持平，适合想用 GGUF 生态但不愿牺牲画质的场景。",
+      "urls": [
+        "https://hf-mirror.com/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q8_0.gguf",
+        "https://huggingface.co/unsloth/MiniMax-H3-GGUF/resolve/main/minimax_h3_fl2va_pruned-Q8_0.gguf"
+      ]
+    },
+    {
+      "id": "fasth3-4step",
+      "label": "FastH3 4 步加速版（实验性）",
+      "filename": "FastH3-comfy-Q4_K_M.gguf",
+      "kind": "gguf",
+      "size_gb": 18.48,
+      "quality": "加速后质量待评估",
+      "speed": "4 步出片，理论 2-3 倍速",
+      "experimental": true,
+      "steps_fixed": 4,
+      "turbo_compat": false,
+      "desc": "社区蒸馏加速版：8 步加速 LoRA 已折叠进权重，必须用 4 步采样且与 TeaCache 加速开关互斥（面板会自动强制）。适合追求出片速度的草稿迭代；画质请自行对比评估。",
+      "urls": [
+        "https://hf-mirror.com/realrebelai/FastH3_GGUFs/resolve/main/FastH3-comfy-Q4_K_M.gguf",
+        "https://huggingface.co/realrebelai/FastH3_GGUFs/resolve/main/FastH3-comfy-Q4_K_M.gguf"
+      ]
+    }
+  ]
+}

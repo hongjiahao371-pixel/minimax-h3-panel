@@ -407,6 +407,39 @@ details.adv summary:hover{color:var(--ink2)}
 .loginbox button{padding:11px;border:none;border-radius:12px;background:var(--grad);color:#fff;
   font-size:13.5px;font-weight:750;cursor:pointer;box-shadow:0 8px 22px rgba(37,87,255,.35)}
 .login-err{color:#c93131;font-size:12px;min-height:16px}
+
+/* ---------- v5.0 模型库 ---------- */
+.modelhub{margin-top:34px}
+.mh-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.mh-title{font-size:17px;font-weight:800;color:var(--ink)}
+.mh-hw{display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.mh-hw b{color:var(--ink)}
+.mtag{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:750;white-space:nowrap}
+.mtag.fit{background:rgba(34,170,90,.14);color:#0d7c3e;border:1px solid rgba(34,170,90,.35)}
+.mtag.stream{background:rgba(59,130,246,.12);color:#14419f;border:1px solid rgba(59,130,246,.32)}
+.mtag.heavy{background:rgba(224,82,82,.12);color:#c93131;border:1px solid rgba(224,82,82,.35)}
+.mtag.def{background:rgba(124,58,237,.12);color:#6d28d9;border:1px solid rgba(124,58,237,.32)}
+.mtag.kind{background:rgba(120,140,180,.14);color:var(--ink2);border:1px solid rgba(120,140,180,.25)}
+.mtag.exp{background:rgba(240,150,30,.14);color:#b45309;border:1px solid rgba(240,150,30,.35)}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.mcard{background:rgba(255,255,255,.58);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid rgba(255,255,255,.85);border-radius:18px;padding:16px 17px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 10px 30px -14px rgba(40,60,140,.28);
+  display:flex;flex-direction:column;gap:9px}
+.mcard.default{border-color:rgba(124,58,237,.45)}
+.mrow{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.mname{font-size:14px;font-weight:800;color:var(--ink)}
+.mdesc{font-size:12px;line-height:1.55;color:var(--ink2)}
+.mnote{font-size:11px;line-height:1.5;color:var(--ink3)}
+.mbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.mbtns button{padding:8px 14px;border:1px solid rgba(120,140,180,.32);border-radius:11px;background:rgba(255,255,255,.6);
+  color:var(--ink2);font-size:12px;font-weight:650;cursor:pointer;transition:.13s}
+.mbtns button:hover{border-color:rgba(59,130,246,.55);color:#14419f;background:#fff}
+.mbtns button.primary{background:var(--grad);border:none;color:#fff;box-shadow:0 6px 18px rgba(37,87,255,.3)}
+.mbtns button.primary:hover{color:#fff;filter:brightness(1.06)}
+.mbtns button.danger:hover{border-color:rgba(224,82,82,.6);color:#c93131}
+.mprog{height:8px;border-radius:99px;background:rgba(120,140,180,.18);overflow:hidden}
+.mprog i{display:block;height:100%;background:var(--grad);border-radius:99px;transition:width .6s}
+.mstat{font-size:11.5px;color:var(--ink2)}
 </style>
 </head>
 <body>
@@ -423,6 +456,7 @@ details.adv summary:hover{color:var(--ink2)}
   <button class="ni on" id="navStudio" type="button">🎬 创作台</button>
   <button class="ni" id="navChain" type="button">🎞 长片接龙<span class="badge">全自动</span></button>
   <button class="ni" id="navAdv" type="button">⚙️ 高级参数</button>
+  <button class="ni" id="navModels" type="button">🧩 模型库<span class="badge" id="modelsBadge" hidden></span></button>
 
   <div class="sec">作品库</div>
   <button class="ni" id="navLib" type="button">📚 全部作品</button>
@@ -581,6 +615,13 @@ details.adv summary:hover{color:var(--ink2)}
       <details class="adv" id="adv">
         <summary>高级选项</summary>
         <div class="adv-body">
+          <div class="row2" style="margin-bottom:12px">
+            <div>
+              <label>模型（DiT 权重）</label>
+              <select id="model"><option value="">加载中…</option></select>
+            </div>
+            <div class="muted-note" id="modelNote" style="align-self:end">社区衍生模型可在「模型库」一键下载部署</div>
+          </div>
           <div class="row3">
             <div>
               <label>采样步数</label>
@@ -650,6 +691,15 @@ details.adv summary:hover{color:var(--ink2)}
     <div id="chainArea"></div>
   </section>
 
+  <section class="library modelhub" id="modelsSec">
+    <div class="mh-head">
+      <span class="mh-title">🧩 模型库</span>
+      <span class="mh-hw" id="mhHw">检测本机硬件…</span>
+      <span class="muted" style="font-size:12px" id="mhMsg"></span>
+    </div>
+    <div class="mgrid" id="modelGrid"><span class="muted" style="font-size:12px">正在加载模型目录…</span></div>
+  </section>
+
   <section class="library" id="historySec">
     <div class="lib-head">
       <span class="lib-title">📚 作品库</span>
@@ -670,7 +720,7 @@ details.adv summary:hover{color:var(--ink2)}
     </div>
   </section>
 
-  <div class="foot">MiniMax-H3 面板 v4.3 · 毛玻璃 · 宽屏自适应 · 任务跟踪 · AI 增强配方 · 参数矩阵 · 工作流可视化</div>
+  <div class="foot">MiniMax-H3 面板 v5.0 · 模型库 · 毛玻璃 · 宽屏自适应 · 任务跟踪 · AI 增强配方 · 参数矩阵 · 工作流可视化</div>
 </main>
 
 <div class="cmp" id="cmp" hidden>
@@ -912,7 +962,8 @@ function updEta(){
     n=(+$('#count').value)*scanV;
   const imgFactor=(img1||img2)?1.05:1;
   const tokens=w*h*len;
-  const bucket=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo);
+  const cm=curModel()||(window.H3MODELS&&window.H3MODELS.default_model)||'';
+  const bucket=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo&&(b.model||'')===cm);
   let sec=bucket?bucket.avg*n*imgFactor:143*(tokens)/(864*480*124)*(steps/8)*(turbo?1:1.43)*n*imgFactor*(1+tokens/TOKEN_BUDGET*0.35);
   const oomMax=window.H3STATS&&window.H3STATS.oom_tokens_max;
   const eta=$('#eta');
@@ -1042,7 +1093,7 @@ $('#go').addEventListener('click',()=>{
   const [w,h]=curRes();
   const cur={prompt,w,h,len:+$('#length').value,steps:+$('#steps').value,
     turbo:$('#turbo').checked,sampler:$('#sampler').value,scheduler:$('#scheduler').value,
-    seed:+$('#seed').value,count:+$('#count').value,i2v:!!(img1||img2)};
+    seed:+$('#seed').value,count:+$('#count').value,i2v:!!(img1||img2),model:$('#model').value||''};
   if(lastSubmit&&JSON.stringify(cur)===JSON.stringify(lastSubmit)&&cur.seed>0){
     if(!confirm('参数与上一次生成完全相同（包括种子），结果可能一样，仍要继续吗？')){
       pendingCont=false;return;
@@ -1062,6 +1113,7 @@ $('#go').addEventListener('click',()=>{
     body:JSON.stringify({prompt,width:w,height:h,length:+$('#length').value,steps:+$('#steps').value,
       count:+$('#count').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,crop:$('#crop').value,force:forceFlag,
+      model:$('#model').value||undefined,
       steps_list:(($('#stepscan')&&$('#stepscan').value||'').split(',').filter(Boolean).map(Number)),
       image_base64:img1||undefined,end_image_base64:img2||undefined})})
   .then(r=>r.json()).then(d=>{
@@ -1149,6 +1201,7 @@ function submitAutoChain(prompt,w,h){
     body:JSON.stringify({prompt,width:w,height:h,length:len,segments:segs,
       steps:+$('#steps').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,
+      model:$('#model').value||undefined,
       force:w*h*len>TOKEN_BUDGET})})
   .then(r=>r.json()).then(d=>{
     if(!d.ok){$('#progText').textContent='提交失败';$('#err').textContent=d.error;finish();return;}
@@ -1351,6 +1404,7 @@ $('#gallery').addEventListener('click',async e=>{
     if(v.scheduler)$('#scheduler').value=v.scheduler;
     if(v.crop)$('#crop').value=v.crop;
     if(v.turbo!=null)$('#turbo').checked=v.turbo;
+    if(v.model&&[...$('#model').options].some(o=>o.value===v.model)){$('#model').value=v.model;updModelNote();}
     chain=[];
     window.scrollTo({top:0,behavior:'smooth'});
   }else if(act==='cont'){
@@ -1433,6 +1487,7 @@ function refillFromParams(p){
   if(p.sampler)$('#sampler').value=p.sampler;
   if(p.scheduler)$('#scheduler').value=p.scheduler;
   if(p.crop)$('#crop').value=p.crop;
+  if(p.model&&[...$('#model').options].some(o=>o.value===p.model)){$('#model').value=p.model;updModelNote();}
   if(p.w&&p.h){
     const ar=p.w/p.h;aspect=ar>1.25?'16:9':(ar<0.8?'9:16':'1:1');
     const qi=RES[aspect].findIndex(r=>Math.abs(r[0]-p.w)<=32);quality=Math.max(0,qi);
@@ -1452,7 +1507,7 @@ function refreshQueue(){
     list.innerHTML=d.items.map(t=>{
       const info=[(t.width&&t.height)?(t.width+'×'+t.height):'',
                   t.length?('约 '+Math.round(t.length/24)+'s'):'',
-                  (t.seed!=null?('seed '+t.seed):'')].filter(Boolean).join(' · ');
+                  (t.seed!=null?('seed '+t.seed):''), t.model_label||''].filter(Boolean).join(' · ');
       const pr=(t.prompt||'（外部提交的任务）').replace(/</g,'&lt;');
       const st=t.cancel_req?'⌛ 取消中…':(t.status==='postproc'?'🪄 AI 处理中':(t.status==='running'?'▶ 运行中':'⏳ 排队'));
       return '<div class="qitem"><span class="qdot '+(t.cancel_req?'':(t.status==='postproc'?'pp':(t.status==='running'?'run':'')))+'"></span>'+
@@ -1652,7 +1707,8 @@ function presetParams() {
     length: +$('#length').value, count: +$('#count').value,
     steps: +$('#steps').value, sampler: $('#sampler').value,
     scheduler: $('#scheduler').value, crop: $('#crop').value,
-    turbo: $('#turbo').checked, autopost: $('#autopost').value
+    turbo: $('#turbo').checked, autopost: $('#autopost').value,
+    model: $('#model').value
   };
 }
 function applyPreset(p) {
@@ -1668,6 +1724,7 @@ function applyPreset(p) {
     if (p.crop) $('#crop').value = p.crop;
     if (p.turbo != null) $('#turbo').checked = !!p.turbo;
     if (p.autopost != null) $('#autopost').value = p.autopost;
+    if (p.model && [...$('#model').options].some(o => o.value === p.model)) { $('#model').value = p.model; updModelNote(); }
     updQualityLabels(); updEta(); renderPipe();
   } catch (_) {}
 }
@@ -1700,6 +1757,116 @@ document.getElementById('presetSel').addEventListener('change', e => {
   if (p) applyPreset(p);
 });
 renderPresets();
+
+$('#navModels').addEventListener('click',()=>{
+  setActiveNav('navModels');
+  loadModels();
+  $('#modelsSec').scrollIntoView({behavior:'smooth',block:'start'});
+});
+
+// ---------- v5.0 模型库 ----------
+window.H3MODELS=null; let _prevDlStatus=null;
+function curModel(){return ($('#model')&&$('#model').value)||'';}
+function esc(s){return String(s==null?'':s).replace(/</g,'&lt;');}
+function fillModelSelect(){
+  const m=window.H3MODELS, sel=$('#model'); if(!m||!sel)return;
+  const inst=m.installed||[];
+  const prev=sel.value||localStorage.getItem('h3model')||'';
+  sel.innerHTML=inst.map(x=>'<option value="'+esc(x.filename)+'">'+(x.rec==='fit'?'⚡':'')+esc(x.label)+(x.is_default?' · 默认':'')+'</option>').join('')
+    ||'<option value="">未检测到已安装模型</option>';
+  const prefer=[prev,m.default_model,inst[0]&&inst[0].filename].find(v=>v&&inst.some(x=>x.filename===v));
+  if(prefer)sel.value=prefer;
+}
+function updModelNote(){
+  const m=window.H3MODELS, note=$('#modelNote'); if(!m||!note)return;
+  const e=(m.installed||[]).find(x=>x.filename===$('#model').value);
+  if(!e){note.textContent='社区衍生模型可在「模型库」一键下载部署';return;}
+  const bits=[e.desc];
+  if(e.rec_note)bits.push(e.rec_note);
+  if(e.steps_fixed)bits.push('加速版：步数锁定 '+e.steps_fixed+'，加速开关自动忽略');
+  else if(e.turbo_compat===false)bits.push('该模型与加速开关互斥（提交时自动忽略加速）');
+  note.textContent=bits.filter(Boolean).join('。');
+}
+function recBadge(rec){
+  return rec==='fit'?'<span class="mtag fit">推荐 · 可常驻显存</span>'
+    :rec==='stream'?'<span class="mtag stream">可用 · 流式加载</span>'
+    :rec==='heavy'?'<span class="mtag heavy">超显存 · 不建议</span>':'';
+}
+function modelCard(x,dl){
+  const kind=x.kind==='gguf'?'<span class="mtag kind">GGUF</span>':'<span class="mtag kind">safetensors</span>';
+  const exp=x.experimental?'<span class="mtag exp">实验性</span>':'';
+  const def=x.is_default?'<span class="mtag def">默认</span>':'';
+  let body='',btns='';
+  if(dl){
+    const pct=dl.total?Math.min(100,Math.round((dl.downloaded||0)/dl.total*100)):0;
+    const sp=dl.speed?(dl.speed/1048576).toFixed(1):'–';
+    const eta=(dl.eta_s!=null)?(' · 剩余 '+(dl.eta_s>90?Math.round(dl.eta_s/60)+' 分':Math.round(dl.eta_s/30)*30+' 秒')):'';
+    body='<div class="mprog"><i style="width:'+pct+'%"></i></div>'
+      +'<div class="mstat">'+pct+'% · '+((dl.downloaded||0)/1073741824).toFixed(2)+'/'+(((dl.total||0)||((x.size_gb||0)*1073741824))/1073741824).toFixed(2)+' GB · '+sp+' MB/s'+eta+'</div>';
+    btns='<button data-act="dlcancel" type="button">取消下载</button>';
+  }else if(x.installed){
+    btns=(x.is_default?'':'<button data-act="setdef" data-fn="'+esc(x.filename)+'" type="button">设为默认</button>')
+      +'<button data-act="del" data-fn="'+esc(x.filename)+'" class="danger" type="button">删除</button>';
+  }else{
+    if(x.need_gguf)body='<div class="mstat" style="color:#b45309">需要先在 ComfyUI 安装 ComfyUI-GGUF 组件才能使用 GGUF 模型</div>';
+    else btns='<button data-act="download" data-fn="'+esc(x.filename)+'" class="primary" type="button">⬇ 下载部署（约 '+(x.size_gb||'?')+' GB）</button>';
+  }
+  return '<div class="mcard'+(x.is_default?' default':'')+'">'
+    +'<div class="mrow"><span class="mname">'+esc(x.label)+'</span>'+def+kind+exp+recBadge(x.rec)+'</div>'
+    +'<div class="mdesc">'+esc(x.desc)+'</div>'
+    +'<div class="mnote">'+esc([x.quality?('画质：'+x.quality):'',x.speed?('速度：'+x.speed):''].filter(Boolean).join(' · '))+'</div>'
+    +body+(btns?'<div class="mbtns">'+btns+'</div>':'')
+    +'</div>';
+}
+function renderModelHub(){
+  const m=window.H3MODELS, grid=$('#modelGrid'); if(!m||!grid)return;
+  const dlSt=m.download||null;
+  const dl=(dlSt&&(dlSt.status==='downloading'||dlSt.status==='starting'))?dlSt:null;
+  const hw=m.hardware||{};
+  const gg=m.gguf_ready===true?'<b>已就绪</b>':(m.gguf_ready===false?'<span style="color:#b45309">未安装</span>':'未知');
+  $('#mhHw').innerHTML=hw.online
+    ?('本机 GPU：<b>'+esc((hw.gpu||'').replace('NVIDIA GeForce ',''))+'</b> · 显存 <b>'+hw.vram_gb+'GB</b> · 内存 <b>'+hw.ram_gb+'GB</b> · GGUF 组件：'+gg)
+    :'ComfyUI 离线，无法检测硬件（浏览与下载不受影响，装回显卡后即可选用）';
+  let msg='';
+  if(dlSt&&dlSt.status==='done')msg='✅ 下载完成：'+(dlSt.label||'')+'，已可选用';
+  else if(dlSt&&dlSt.status==='interrupted')msg='⏸ 上次下载被中断：'+(dlSt.label||'')+'（重新点下载会断点续传）';
+  else if(dlSt&&dlSt.status==='error')msg='❌ 下载失败：'+(dlSt.error||'');
+  else if(dlSt&&dlSt.status==='cancelled')msg='下载已取消';
+  $('#mhMsg').textContent=msg; _prevDlStatus=dlSt?dlSt.status:null;
+  let html=(m.installed||[]).map(x=>modelCard(x,dl&&dl.filename===x.filename?dl:null)).join('');
+  const av=m.available||[];
+  if(av.length)html+='<div style="grid-column:1/-1;margin-top:8px"><span class="mh-title" style="font-size:14px">可下载的社区衍生模型（点卡片上的按钮自动下载部署）</span></div>';
+  html+=av.map(x=>modelCard(x,dl&&dl.filename===x.filename?dl:null)).join('');
+  grid.innerHTML=html||'<span class="muted" style="font-size:12px">模型目录为空</span>';
+}
+function loadModels(){
+  return fetch('/api/models').then(r=>r.json()).then(d=>{
+    if(!d.ok)return;
+    window.H3MODELS=d;
+    fillModelSelect();updModelNote();renderModelHub();updEta();
+  }).catch(()=>{});
+}
+loadModels(); setInterval(loadModels,4000);
+$('#modelGrid').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-act]'); if(!b)return;
+  const act=b.dataset.act, fn=b.dataset.fn||'';
+  if(act==='download'){
+    const m=window.H3MODELS||{};
+    const entry=(m.available||[]).find(x=>x.filename===fn)||{};
+    if(entry.rec==='heavy'&&!confirm('该模型约 '+(entry.size_gb||'?')+'GB，远超本机显存，下载后大概率无法流畅使用。仍要下载吗？'))return;
+    b.disabled=true;b.textContent='提交中…';
+    fetch('/api/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:fn})})
+      .then(r=>r.json()).then(d=>{if(!d.ok)alert(d.error||'下载失败');loadModels();});
+  }else if(act==='dlcancel'){
+    fetch('/api/models/download/cancel',{method:'POST'}).then(()=>loadModels());
+  }else if(act==='setdef'){
+    fetch('/api/models/default',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:fn})})
+      .then(r=>r.json()).then(d=>{if(!d.ok)alert(d.error||'设置失败');loadModels();});
+  }else if(act==='del'){
+    if(!confirm('删除模型文件 '+fn+'？\n（删除后可随时在模型库重新下载）'))return;
+    fetch('/api/models/'+encodeURIComponent(fn),{method:'DELETE'}).then(r=>r.json()).then(d=>{if(!d.ok)alert(d.error||'删除失败');loadModels();});
+  }
+});
 
 // ---------- v4.3 步数扫描联动 ----------
 document.getElementById('stepscan').addEventListener('change', () => updEta());
