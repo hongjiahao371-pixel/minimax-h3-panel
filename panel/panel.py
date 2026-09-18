@@ -1572,11 +1572,313 @@ def autojob(job_id):
     return jsonify(out)
 
 
+# ---------------- 通宵批量：提示词池无人值守编排 ----------------
+BATCH_FILE = os.path.join(CONFIG["data_dir"], "batch.json")
+BATCH_JOBS = {}  # id -> job（同时只跑一个批次；文件里保留最近一个供重启后查看汇总）
+BATCH_LOCK = threading.Lock()
+_BATCH_LAST_ID = None
+BATCH_MAX_PROMPTS = 60
+BATCH_MAX_TASKS = 240
+PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110}  # 自动后处理单任务秒级估算
+
+
+def _batch_save():
+    try:
+        tmp = BATCH_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"job": BATCH_JOBS.get(_BATCH_LAST_ID)}, f, ensure_ascii=False)
+        os.replace(tmp, BATCH_FILE)
+    except Exception:
+        pass
+
+
+def _estimate_seconds_per(p):
+    """单任务耗时估算：优先同参数（含模型）的历史实测，退化为线性模型，加自动后处理估算"""
+    per = None
+    try:
+        with LOCK:
+            vals = [m["gen_seconds"] for m in META["videos"].values()
+                    if m.get("gen_seconds") and m.get("width") == p["width"] and m.get("height") == p["height"]
+                    and m.get("length") == p["length"] and m.get("steps") == p["steps"]
+                    and bool(m.get("turbo")) == p["turbo"] and (m.get("model") or UNET) == p["model"]
+                    and not m.get("merged") and not m.get("chain") and not m.get("postproc")]
+        if vals:
+            per = sum(vals) / len(vals)
+    except Exception:
+        pass
+    if not per:
+        tokens = p["width"] * p["height"] * p["length"]
+        per = 143 * tokens / (864 * 480 * 124) * (p["steps"] / 8) * (1 if p["turbo"] else 1.43) \
+              * (1 + tokens / TOKEN_BUDGET * 0.35)
+    return round(per + PP_EST.get(p.get("autopost") or "", 0))
+
+
+def _batch_autopost(video, p, failures, prompt, seed):
+    """批次内同步执行自动后处理；引擎/显存不就绪记一条说明，不中断批次"""
+    mode = p.get("autopost")
+    if not mode or not video:
+        return
+    eng = _pp_engine_check(mode)
+    if eng:
+        failures.append({"prompt": prompt, "seed": seed, "step": p["steps"],
+                         "error": "成片已入库，自动处理跳过：" + eng})
+        return
+    vram_err = _ensure_vram(PP_VRAM_NEED[mode])
+    if vram_err:
+        failures.append({"prompt": prompt, "seed": seed, "step": p["steps"],
+                         "error": "成片已入库，自动处理跳过：" + vram_err})
+        return
+    try:
+        if mode == "rife_x2":
+            r1 = _pp_out_name(video, "rife")
+            _pp_run(video, "rife", os.path.join(OUTPUT, r1))
+            r2 = _pp_out_name(r1, "x2")
+            _pp_run(r1, "x2", os.path.join(OUTPUT, r2))
+        else:
+            _pp_run(video, mode, os.path.join(OUTPUT, _pp_out_name(video, mode)))
+    except Exception as e:
+        failures.append({"prompt": prompt, "seed": seed, "step": p["steps"],
+                         "error": f"成片已入库，自动处理失败：{str(e)[:150]}"})
+
+
+def _batch_submit_one(prompt, seed, p):
+    wf = build_workflow(prompt, p["width"], p["height"], p["length"], seed, p["steps"],
+                        None, None, p["turbo"], p["sampler"], p["scheduler"],
+                        {"filename": p["model"], "kind": p["model_kind"]})
+    r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
+    res = r.json()
+    if "prompt_id" not in res:
+        raise RuntimeError(res.get("error", {}).get("message", "工作流校验失败"))
+    return res["prompt_id"], wf["6"]["inputs"]["width"], wf["6"]["inputs"]["height"]
+
+
+def run_batch_job(job_id):
+    """通宵编排器：逐个提交-等待-入库，失败跳过，连接中断按 60s×30 次重试"""
+    job = BATCH_JOBS[job_id]
+    p = job["params"]
+    try:
+        while True:
+            if job.get("cancel"):
+                job["status"] = "cancelled"
+                job["current"] = None
+                break
+            # 重启续跑：先收尾上个进程提交、尚未等完的在途任务（队列里没有它，不会重复跑）
+            if job.get("pending_tid"):
+                ptid = job["pending_tid"]
+                job["current"] = {"index": "·", "prompt": "（重启前在途任务收尾中）", "seed": None}
+                t0 = time.time()
+                status, vid = _wait_task(ptid, {"cancel": False}, timeout=max(1800, p["length"] * 15))
+                job["pending_tid"] = None
+                job["current"] = None
+                if status == "done" and vid:
+                    job["videos"].append(vid)
+                    job["done"] += 1
+                    _record_meta(vid, "（重启前提交）", p["width"], p["height"], p["length"],
+                                 p["steps"], p["turbo"], False, None, None,
+                                 gen_seconds=round(time.time() - t0),
+                                 model=p.get("model"), model_label=p.get("model_label"))
+                    with LOCK:
+                        META["videos"][vid]["batch"] = job_id
+                        _save_meta()
+                    if p.get("autopost"):
+                        _batch_autopost(vid, p, job["failures"], "（重启前提交）", None)
+                else:
+                    job["failed"] += 1
+                    job["failures"].append({"prompt": "（重启前提交）", "seed": None, "step": p["steps"],
+                                            "error": vid if isinstance(vid, str) and vid else "在途任务超时或无输出"})
+                _batch_save()
+                continue
+            with BATCH_LOCK:
+                if not job["queue"]:
+                    job["status"] = "done"
+                    job["current"] = None
+                    break
+                prompt, seed = job["queue"][0]
+                job["current"] = {"index": job["total"] - len(job["queue"]) + 1,
+                                  "prompt": prompt, "seed": seed}
+                job["current_tid"] = None
+            # 提交（连接类异常 60s×30 重试；工作流校验失败属参数性问题，记失败即跳过）
+            tid = w = h = None
+            dead = False
+            for attempt in range(30):
+                if job.get("cancel"):
+                    break
+                try:
+                    tid, w, h = _batch_submit_one(prompt, seed, p)
+                    job["conn_retry"] = 0
+                    break
+                except requests.RequestException:
+                    job["conn_retry"] = attempt + 1
+                    if attempt < 29:
+                        time.sleep(60)
+                except RuntimeError as e:
+                    job["failures"].append({"prompt": prompt, "seed": seed, "step": p["steps"],
+                                            "error": str(e)[:200]})
+                    break
+            if job.get("cancel"):
+                job["status"] = "cancelled"
+                job["current"] = None
+                break
+            with BATCH_LOCK:
+                job["queue"].pop(0)
+            if tid is None:
+                if job["conn_retry"]:
+                    job["failures"].append({"prompt": prompt, "seed": seed, "step": p["steps"],
+                                            "error": "ComfyUI 持续无法连接（已重试 30 分钟）"})
+                    job["status"] = "error"
+                    job["error"] = "ComfyUI 持续无法连接，批次已终止"
+                    job["current"] = None
+                    _batch_save()
+                    return
+                job["failed"] += 1
+                job["current"] = None
+                _batch_save()
+                continue
+            job["current_tid"] = tid
+            _batch_save()
+            t0 = time.time()
+            # 传无 cancel 标记的 shim：当前片跑完再停，半途不打断
+            status, vid = _wait_task(tid, {"cancel": False}, timeout=max(1800, p["length"] * 15))
+            job["current"] = None
+            if status == "done" and vid:
+                job["videos"].append(vid)
+                job["done"] += 1
+                _record_meta(vid, prompt, w, h, p["length"], p["steps"], p["turbo"], False,
+                             None, None, gen_seconds=round(time.time() - t0),
+                             model=p.get("model"), model_label=p.get("model_label"))
+                with LOCK:
+                    META["videos"][vid]["batch"] = job_id
+                    _save_meta()
+                if p.get("autopost"):
+                    _batch_autopost(vid, p, job["failures"], prompt, seed)
+            else:
+                job["failed"] += 1
+                job["failures"].append({"prompt": prompt, "seed": seed, "step": p["steps"],
+                                        "error": vid if isinstance(vid, str) and vid else "任务超时或无输出"})
+            if job.get("eta_seconds_per"):
+                job["eta_end"] = int(time.time() + len(job["queue"]) * job["eta_seconds_per"])
+            _batch_save()
+        _batch_save()
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = f"内部错误: {e}"[:200]
+        _batch_save()
+
+
+def _batch_restore():
+    """面板重启后：running 批次续跑（在途任务依赖 TASKS watcher 收尾），已完成批次保留汇总"""
+    global _BATCH_LAST_ID
+    try:
+        with open(BATCH_FILE, encoding="utf-8") as f:
+            job = json.load(f).get("job")
+    except Exception:
+        return
+    if not job or not job.get("id"):
+        return
+    _BATCH_LAST_ID = job["id"]
+    if job.get("status") != "running":
+        BATCH_JOBS[job["id"]] = job
+        return
+    job["resumed"] = True
+    job["current"] = None
+    job["pending_tid"] = job.get("current_tid")
+    BATCH_JOBS[job["id"]] = job
+    print(f"[panel] 恢复通宵批次 {job['id']}：剩余 {len(job.get('queue') or [])} 个任务")
+    threading.Thread(target=run_batch_job, args=(job["id"],), daemon=True).start()
+
+
+@app.route("/api/batch", methods=["POST"])
+def batch_start():
+    data = request.json or {}
+    raw = str(data.get("prompts") or "")
+    prompts = [ln.strip()[:1000] for ln in raw.splitlines() if ln.strip()]
+    if not prompts:
+        return jsonify({"ok": False, "error": "请输入提示词（每行一条）"})
+    if len(prompts) > BATCH_MAX_PROMPTS:
+        return jsonify({"ok": False, "error": f"提示词最多 {BATCH_MAX_PROMPTS} 行"})
+    per = max(1, min(4, int(data.get("per_prompt", 1) or 1)))
+    total = len(prompts) * per
+    if total > BATCH_MAX_TASKS:
+        return jsonify({"ok": False, "error": f"共 {total} 个任务，超出单批上限 {BATCH_MAX_TASKS}（减少提示词或种子数）"})
+    with BATCH_LOCK:
+        if any(j.get("status") == "running" for j in BATCH_JOBS.values()):
+            return jsonify({"ok": False, "error": "已有一个通宵批次在跑，可先停止或等它结束"})
+    width = int(data.get("width", 864))
+    height = int(data.get("height", 480))
+    length = int(data.get("length", 124))
+    if width * height * length > TOKEN_BUDGET and not bool(data.get("force", False)):
+        return jsonify({"ok": False, "over_budget": True,
+                        "error": f"该组合（{width}×{height} · {length}帧≈{length//24}秒）超出显存预算，"
+                                 f"每个任务都会失败。请回创作台降低画质或时长。"})
+    SAMPLERS = {"euler", "euler_ancestral", "heun", "dpm_2", "lms", "uni_pc"}
+    SCHEDS = {"normal", "simple", "sgm_uniform", "beta", "karras"}
+    prof = _model_profile(data.get("model"))
+    if data.get("model") and prof["filename"] != DEFAULT_MODEL and prof["filename"] not in _installed_models():
+        return jsonify({"ok": False, "error": f"模型未安装：{prof['label']}"})
+    if prof["needs_gguf"] and _gguf_ready() is not True:
+        return jsonify({"ok": False, "error": "ComfyUI 未检出 GGUF 加载组件，无法使用 GGUF 模型"})
+    p = {"per_prompt": per,
+         "width": width, "height": height, "length": length,
+         "steps": int(prof["steps_fixed"]) if prof.get("steps_fixed") else max(4, min(20, int(data.get("steps", 8) or 8))),
+         "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True),
+         "sampler": data.get("sampler") if data.get("sampler") in SAMPLERS else "euler",
+         "scheduler": data.get("scheduler") if data.get("scheduler") in SCHEDS else "normal",
+         "autopost": data.get("autopost") if data.get("autopost") in ("rife", "x2", "rife_x2") else "",
+         "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"]}
+    queue = [[prompt, random.randint(1, 2 ** 31 - 1)] for prompt in prompts for _ in range(per)]
+    per_sec = _estimate_seconds_per(p)
+    job_id = f"batch_{int(time.time() * 1000):x}"
+    job = {"id": job_id, "status": "running", "created": int(time.time()),
+           "prompts_total": len(prompts), "total": total,
+           "done": 0, "failed": 0, "videos": [], "failures": [],
+           "queue": queue, "current": None, "current_tid": None,
+           "params": p, "eta_seconds_per": per_sec,
+           "eta_end": int(time.time() + total * per_sec),
+           "conn_retry": 0, "cancel": False, "error": ""}
+    with BATCH_LOCK:
+        BATCH_JOBS[job_id] = job
+    global _BATCH_LAST_ID
+    _BATCH_LAST_ID = job_id
+    _batch_save()
+    threading.Thread(target=run_batch_job, args=(job_id,), daemon=True).start()
+    return jsonify({"ok": True, "job_id": job_id, "total": total,
+                    "eta_seconds_per": per_sec, "eta_end": job["eta_end"]})
+
+
+@app.route("/api/batch/active")
+def batch_active():
+    with BATCH_LOCK:
+        job = next((j for j in BATCH_JOBS.values() if j.get("status") == "running"), None) \
+            or (BATCH_JOBS.get(_BATCH_LAST_ID) if _BATCH_LAST_ID else None)
+    if not job:
+        return jsonify({"ok": True, "job": None})
+    p = dict(job.get("params") or {})
+    p.pop("model_kind", None)
+    return jsonify({"ok": True, "job": {
+        "id": job.get("id"), "status": job.get("status"),
+        "created": job.get("created"), "prompts_total": job.get("prompts_total"),
+        "total": job.get("total"), "done": job.get("done"), "failed": job.get("failed"),
+        "videos": job.get("videos"), "failures": job.get("failures"),
+        "current": job.get("current"), "conn_retry": job.get("conn_retry"),
+        "eta_end": job.get("eta_end"), "eta_seconds_per": job.get("eta_seconds_per"),
+        "error": job.get("error"), "params": p}})
+
+
+@app.route("/api/batch/<job_id>/cancel", methods=["POST"])
+def batch_cancel(job_id):
+    job = BATCH_JOBS.get(job_id)
+    if not job or job.get("status") != "running":
+        return jsonify({"ok": False, "error": "没有正在运行的通宵批次"})
+    job["cancel"] = True
+    return jsonify({"ok": True, "status": "stopping"})
+
+
 if __name__ == "__main__":
     # 重启后遗留的未完成任务：补挂后台 watcher 自动收尾入库
     for _tid in list(TASKS):
         threading.Thread(target=_watch_task, args=(_tid,), daemon=True).start()
     _dl_restore()
+    _batch_restore()
     print(f"[panel] http://0.0.0.0:{CONFIG['port']}  ComfyUI={COMFY}  output={OUTPUT}")
     print(f"[panel] 模型库目录={MODELS_DIR}  默认模型={DEFAULT_MODEL}  目录条目={len(CATALOG)} 个")
     if not CONFIG["access_password"]:

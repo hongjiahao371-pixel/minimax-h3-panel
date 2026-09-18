@@ -440,6 +440,27 @@ details.adv summary:hover{color:var(--ink2)}
 .mprog{height:8px;border-radius:99px;background:rgba(120,140,180,.18);overflow:hidden}
 .mprog i{display:block;height:100%;background:var(--grad);border-radius:99px;transition:width .6s}
 .mstat{font-size:11.5px;color:var(--ink2)}
+
+/* ---------- v6.0 通宵批量 ---------- */
+.batchsec textarea{width:100%;min-height:120px;padding:13px 15px;border:1px solid rgba(120,140,180,.32);
+  border-radius:14px;background:rgba(255,255,255,.62);font-size:13px;line-height:1.6;color:var(--ink);
+  outline:none;resize:vertical;font-family:inherit}
+.batchsec textarea:focus{border-color:rgba(59,130,246,.6);background:#fff}
+.brow{display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.brow .go{padding:11px 26px;border:none;border-radius:13px;background:var(--grad);color:#fff;
+  font-size:13.5px;font-weight:750;cursor:pointer;box-shadow:0 8px 22px rgba(37,87,255,.35)}
+.brow .go:disabled{opacity:.55;cursor:default}
+.brow .cancel{padding:10px 18px;border:1px solid rgba(224,82,82,.45);border-radius:12px;
+  background:rgba(224,82,82,.08);color:#c93131;font-size:12.5px;cursor:pointer}
+.bprog-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.bprog-head b{font-size:14px;color:var(--ink)}
+.bstat{font-size:12.5px;color:var(--ink2)}
+.bstat b{color:var(--ink)}
+.bcur{font-size:12px;color:var(--ink2);margin-top:4px}
+.bcur b{color:var(--ink)}
+.bfails{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.bfails .bf{font-size:11.5px;color:#b45309;background:rgba(240,150,30,.09);
+  border:1px solid rgba(240,150,30,.22);border-radius:9px;padding:6px 10px;line-height:1.5}
 </style>
 </head>
 <body>
@@ -457,6 +478,7 @@ details.adv summary:hover{color:var(--ink2)}
   <button class="ni" id="navChain" type="button">🎞 长片接龙<span class="badge">全自动</span></button>
   <button class="ni" id="navAdv" type="button">⚙️ 高级参数</button>
   <button class="ni" id="navModels" type="button">🧩 模型库<span class="badge" id="modelsBadge" hidden></span></button>
+  <button class="ni" id="navBatch" type="button">🌙 通宵批量</button>
 
   <div class="sec">作品库</div>
   <button class="ni" id="navLib" type="button">📚 全部作品</button>
@@ -700,6 +722,42 @@ details.adv summary:hover{color:var(--ink2)}
     <div class="mgrid" id="modelGrid"><span class="muted" style="font-size:12px">正在加载模型目录…</span></div>
   </section>
 
+  <section class="library batchsec" id="batchSec">
+    <div class="mh-head">
+      <span class="mh-title">🌙 通宵批量</span>
+      <span class="muted" style="font-size:12px">贴一批提示词挂机跑，成片自动入库；队列与创作台共用，临时任务可随时插队</span>
+    </div>
+    <div id="batchForm">
+      <textarea id="batchPrompts" rows="6" placeholder="每行一条提示词，例如：&#10;雨夜城市街头，撑伞行人缓缓走过镜头，霓虹倒映在湿路面，电影感&#10;金色麦田里的风，日落逆光，缓慢推近&#10;……"></textarea>
+      <div class="row3" style="margin-top:10px">
+        <div>
+          <label>每条出几个种子</label>
+          <select id="batchPer">
+            <option value="1" selected>× 1</option>
+            <option value="2">× 2（不同种子）</option>
+            <option value="4">× 4（不同种子）</option>
+          </select>
+        </div>
+        <div class="muted-note" id="batchSummary" style="align-self:end">参数沿用创作台（画幅 / 画质 / 时长 / 步数 / 模型 / 加速 / 自动处理）</div>
+        <div></div>
+      </div>
+      <div class="brow">
+        <button class="go" id="batchGo" type="button">🌙 开始通宵跑</button>
+        <button class="cancel" id="batchCancel" hidden>停止批次（当前片跑完后停）</button>
+      </div>
+    </div>
+    <div id="batchProg" hidden>
+      <div class="bprog-head">
+        <b id="batchTitle">批次进行中</b>
+        <span id="batchMsg" class="muted" style="font-size:12px"></span>
+      </div>
+      <div class="mprog" style="margin:8px 0 6px"><i id="batchFill" style="width:0%"></i></div>
+      <div class="bstat" id="batchStat"></div>
+      <div class="bcur" id="batchCur"></div>
+      <div class="bfails" id="batchFails"></div>
+    </div>
+  </section>
+
   <section class="library" id="historySec">
     <div class="lib-head">
       <span class="lib-title">📚 作品库</span>
@@ -720,7 +778,7 @@ details.adv summary:hover{color:var(--ink2)}
     </div>
   </section>
 
-  <div class="foot">MiniMax-H3 面板 v5.0 · 模型库 · 毛玻璃 · 宽屏自适应 · 任务跟踪 · AI 增强配方 · 参数矩阵 · 工作流可视化</div>
+  <div class="foot">MiniMax-H3 面板 v6.0 · 通宵批量 · 模型库 · 毛玻璃 · 任务跟踪 · AI 增强 · 参数矩阵 · 工作流可视化</div>
 </main>
 
 <div class="cmp" id="cmp" hidden>
@@ -979,6 +1037,7 @@ function updEta(){
   }else{
     eta.textContent=(bucket?'[实测校准] ':'')+'预计耗时约 '+(sec/60).toFixed(1)+' 分钟（'+n+' 个任务排队执行）';
   }
+  if(window.updBatchSummary)updBatchSummary();
 }
 $('#length').addEventListener('change',updEta);
 $('#count').addEventListener('change',updEta);
@@ -1867,6 +1926,122 @@ $('#modelGrid').addEventListener('click',e=>{
     fetch('/api/models/'+encodeURIComponent(fn),{method:'DELETE'}).then(r=>r.json()).then(d=>{if(!d.ok)alert(d.error||'删除失败');loadModels();});
   }
 });
+
+// ---------- v6.0 通宵批量 ----------
+window._batchRunning=false; let _batchSeenCnt=0;
+const BATCH_PP_EST={'':0,'rife':25,'x2':85,'rife_x2':110};
+function batchLines(){return $('#batchPrompts').value.split('\n').map(s=>s.trim()).filter(Boolean);}
+function batchCount(){return batchLines().length*(+$('#batchPer').value||1);}
+function batchEtaSec(){
+  const [w,h]=curRes(),len=+$('#length').value,steps=+$('#steps').value,turbo=$('#turbo').checked;
+  const cm=curModel()||(window.H3MODELS&&window.H3MODELS.default_model)||'';
+  const b=(window.H3STATS&&window.H3STATS.buckets||[]).find(b=>b.w===w&&b.h===h&&b.len===len&&b.steps===steps&&b.turbo===turbo&&(b.model||'')===cm);
+  const tokens=w*h*len;
+  const per=b?b.avg:143*tokens/(864*480*124)*(steps/8)*(turbo?1:1.43)*(1+tokens/TOKEN_BUDGET*0.35);
+  return per+(BATCH_PP_EST[$('#autopost').value]||0);
+}
+function fmtClock(ts){const d=new Date(ts*1000);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);}
+function updBatchSummary(){
+  const el=$('#batchSummary'); if(!el)return;
+  const lines=batchLines().length, n=batchCount();
+  if(!lines){el.textContent='参数沿用创作台（画幅 / 画质 / 时长 / 步数 / 模型 / 加速 / 自动处理）';return;}
+  if(n>240){el.innerHTML='<span style="color:var(--bad)">共 '+n+' 个任务，超出单批上限 240，请减少行数或种子数</span>';return;}
+  const sec=batchEtaSec()*n;
+  el.innerHTML='将生成 <b>'+n+'</b> 个视频（'+lines+' 条提示词）· 约 <b>'+(sec/3600).toFixed(1)+'</b> 小时 · 预计 <b>'+fmtClock(Date.now()/1000+sec)+'</b> 完成';
+}
+$('#batchPrompts').addEventListener('input',updBatchSummary);
+$('#batchPer').addEventListener('change',updBatchSummary);
+$('#autopost').addEventListener('change',updBatchSummary);
+$('#navBatch').addEventListener('click',()=>{
+  setActiveNav('navBatch');
+  updBatchSummary();
+  $('#batchSec').scrollIntoView({behavior:'smooth',block:'start'});
+});
+function renderBatch(j){
+  $('#batchProg').hidden=false;
+  const running=j.status==='running';
+  $('#batchCancel').hidden=!running;
+  $('#batchForm').style.display=running?'none':'';
+  let msg='';
+  if(j.status==='done')msg='✅ 全部完成：'+j.done+' 成功'+(j.failed?(' / '+j.failed+' 失败'):'');
+  else if(j.status==='cancelled')msg='⏹ 已停止（完成 '+j.done+' / 失败 '+j.failed+'，剩余未跑 '+(j.total-j.done-j.failed)+'）';
+  else if(j.status==='error')msg='❌ 批次终止：'+(j.error||'未知原因');
+  $('#batchMsg').textContent=msg;
+  $('#batchTitle').textContent=running?'🌙 通宵批次进行中':(j.status==='done'?'🌙 通宵批次已全部完成':'🌙 通宵批次已结束');
+  const finished=(j.done||0)+(j.failed||0);
+  $('#batchFill').style.width=(j.total?Math.round(finished/j.total*100):0)+'%';
+  const bits=['<b>'+finished+'/'+j.total+'</b> 个任务','<b>'+(j.done||0)+'</b> 成功','<b>'+(j.failed||0)+'</b> 失败'];
+  if(j.conn_retry)bits.push('<span style="color:#b45309">⚠ ComfyUI 连接中断，重试中（第 '+j.conn_retry+'/30 次）</span>');
+  if(running&&j.eta_end)bits.push('预计 <b>'+fmtClock(j.eta_end)+'</b> 跑完');
+  $('#batchStat').innerHTML=bits.join(' · ');
+  const cur=j.current;
+  $('#batchCur').innerHTML=running&&cur
+    ?('正在跑第 <b>'+cur.index+'/'+j.total+'</b> 个：<b>'+esc(cur.prompt.slice(0,46))+(cur.prompt.length>46?'…':'')+'</b> · 种子 '+cur.seed
+      +(j.params?(' · '+esc(j.params.width+'×'+j.params.height)+' · '+(j.params.model_label||'')):''))
+    :'';
+  const fl=j.failures||[];
+  $('#batchFails').innerHTML=fl.length
+    ?('<div class="bf">'+fl.slice(-8).map(f=>'第 '+(f.step||'?')+' 步 · 种子 '+(f.seed!=null?f.seed:'?')+' · '+esc((f.prompt||'').slice(0,24))+'…：'+esc(f.error)).join('</div><div class="bf">')+'</div>'
+      +(fl.length>8?'<div class="muted" style="font-size:11px">仅显示最近 8 条，共 '+fl.length+' 条</div>':''))
+    :'';
+}
+function pollBatch(){
+  fetch('/api/batch/active').then(r=>r.json()).then(d=>{
+    const j=d.job;
+    if(!j){$('#batchProg').hidden=true;$('#batchForm').style.display='';window._batchRunning=false;return;}
+    renderBatch(j);
+    if((j.videos||[]).length!==_batchSeenCnt){_batchSeenCnt=(j.videos||[]).length;loadGallery();}
+    if(j.status==='running'){
+      window._batchRunning=true;
+      setTimeout(pollBatch,5000);
+    }else{
+      window._batchRunning=false;
+      if(j.status==='done'){ding(880);flashTitle('✅ 通宵批量完成');}
+      else if(j.status==='error'){ding(220);flashTitle('❌ 通宵批次终止');}
+      else{ding(330);}
+      loadGallery();
+    }
+  }).catch(()=>{setTimeout(pollBatch,8000);});
+}
+$('#batchGo').addEventListener('click',()=>{
+  const prompts=batchLines();
+  if(!prompts.length){alert('请先输入提示词（每行一条）');return;}
+  const n=batchCount();
+  if(n>240){alert('共 '+n+' 个任务，超出单批上限 240（减少提示词行数或种子数）');return;}
+  const [w,h]=curRes(),len=+$('#length').value;
+  if(w*h*len>TOKEN_BUDGET&&!confirm('当前画幅/时长组合超出显存预算，每个任务都会失败。仍要开始吗？'))return;
+  if(!confirm('将按顺序自动生成 '+n+' 个视频（约 '+(batchEtaSec()*n/3600).toFixed(1)+' 小时），期间可随时插队临时任务或停止批次。开始？'))return;
+  $('#batchGo').disabled=true;$('#batchGo').textContent='提交中…';
+  fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompts:$('#batchPrompts').value,per_prompt:+$('#batchPer').value,
+      width:w,height:h,length:len,steps:+$('#steps').value,turbo:$('#turbo').checked,
+      sampler:$('#sampler').value,scheduler:$('#scheduler').value,crop:$('#crop').value,
+      model:$('#model').value||undefined,autopost:$('#autopost').value||'',
+      force:w*h*len>TOKEN_BUDGET})})
+  .then(r=>r.json()).then(d=>{
+    $('#batchGo').disabled=false;$('#batchGo').textContent='🌙 开始通宵跑';
+    if(!d.ok){alert(d.error||'提交失败');return;}
+    _batchSeenCnt=0;
+    pollBatch();
+  }).catch(e=>{alert('请求失败: '+e);$('#batchGo').disabled=false;$('#batchGo').textContent='🌙 开始通宵跑';});
+});
+$('#batchCancel').addEventListener('click',()=>{
+  fetch('/api/batch/active').then(r=>r.json()).then(d=>{
+    if(!d.job||d.job.status!=='running')return;
+    if(!confirm('停止通宵批次？当前正在跑的这段会跑完，之后不再继续。'))return;
+    fetch('/api/batch/'+encodeURIComponent(d.job.id)+'/cancel',{method:'POST'}).then(()=>pollBatch());
+  });
+});
+(async function reattachBatch(){
+  try{
+    const d=await fetch('/api/batch/active').then(r=>r.json());
+    if(d.job){
+      _batchSeenCnt=(d.job.videos||[]).length;
+      renderBatch(d.job);
+      if(d.job.status==='running')pollBatch();
+    }
+  }catch(_){}
+})();
 
 // ---------- v4.3 步数扫描联动 ----------
 document.getElementById('stepscan').addEventListener('change', () => updEta());

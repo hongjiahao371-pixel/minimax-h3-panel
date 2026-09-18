@@ -33,6 +33,12 @@
   重启面板生效；未登记的本地权重文件也会被扫描出来、以文件名兜底显示
 - 2026-09-18 时点：**3080 显卡未装回**，comfyui.service 处于 CUDA 缺失崩溃循环（已手动 stop，
   enabled 保留——装回显卡后 `systemctl start comfyui` 即恢复）；生成类端到端验证待显卡回装后补
+- **v6.0 通宵批量**：批次状态持久化在 `panel/data/batch.json`（每任务落盘一次）；面板重启时
+  `_batch_restore()` 续跑剩余队列，重启前的在途任务由新进程先收尾入库（元数据 prompt 标
+  「重启前提交」）——所以批量视频的元数据不依赖浏览器页面。单任务等待上限
+  max(1800s, 时长×15)；ComfyUI 提交连接失败按 60s×30 重试后整批终止。批量任务不写 TASKS，
+  入库完全由编排器负责（与单发任务的 TASKS watcher 是两条路）。本地验证用 mock ComfyUI
+  （Flask 假 /prompt + /history，注入失败/延迟）覆盖 顺序执行/失败跳过/取消/重启续跑 全场景
 
 ## 本机 config.json（对应作者环境）
 
