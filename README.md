@@ -79,6 +79,8 @@ pip install -r requirements.txt
 cp panel/config.example.json panel/config.json
 ```
 
+必改两项：`output_dir`（ComfyUI 输出目录）与 `comfy_models_dir`（ComfyUI 的 `models/diffusion_models` 目录——模型库把下载的模型部署到这里，**必须是 ComfyUI 实际扫描的目录本身**，如果是你手工建的符号链接结构请指向链接目标那一侧的扫描目录）。其余字段见下方配置说明。
+
 2. 启动：
 
 ```bash
@@ -121,8 +123,29 @@ sudo systemctl enable --now h3-panel
 | `vram_budget_tokens` | 显存预算（分辨率×帧数 超过则拦截），12GB 卡参考值 115000000 | 数字 |
 | `vram_warn_tokens` | 接近预算的警告阈值 | 数字 |
 | `access_password` | 访问口令，**留空 = 不启用鉴权** | `""` 或 `"你的口令"` |
+| `comfy_models_dir` | **ComfyUI 实际扫描的扩散模型目录**（模型库下载部署到这里） | `/mnt/ComfyUI/models/diffusion_models` |
+| `default_model` | 默认使用的 DiT 模型文件名（留空用内置基线） | `minimax_h3_fl2va_pruned_int8_convrot.safetensors` |
+| `auto_backup_dir` | 成片自动备份目录（留空 = 关闭） | `/mnt/backup/videos` |
 
 单项配置也可用环境变量 `PANEL_<大写字段名>` 覆盖。
+
+### (可选) GGUF 模型支持
+
+想在模型库使用社区 GGUF 量化（Q2_K～Q8_0，最小 6GB 出头），需要给 ComfyUI 装一次 GGUF 加载组件：
+
+```bash
+bash deploy/install_gguf_node.sh [comfyui目录] [python解释器]
+```
+
+脚本自动 clone city96/ComfyUI-GGUF（github 不通自动走代理前缀，可用 `GH_PROXY=` 自定义）并安装 `gguf` 依赖，装完重启 ComfyUI 生效。之后模型库里的 GGUF 条目一键下载即可用，LoRA 条目也由模型库自动部署到 `loras/` 目录。
+
+### (可选) 云端 LLM 提示词优化 / 拆分
+
+页面「高级选项 → 提示词优化 · 云端 LLM」填 OpenAI 兼容端点（API Base、模型名、API Key），提示词优化与「长文拆分成多条」即走 LLM 分镜（系统提示词已内置 MiniMax-H3 的规范：正向描述、单连续镜头、原生音频描述）；不配置或调用失败自动回落本地规则。
+
+### (可选) 成片自动备份
+
+`config.json` 里设置 `auto_backup_dir` 后，每部成片入库时自动复制一份到该目录（与容量管理的清理互不影响）。
 
 ## 访问口令
 
