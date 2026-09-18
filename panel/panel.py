@@ -48,6 +48,7 @@ def _load_panel_config():
         "access_password": str(pick("access_password", "") or ""),
         "comfy_models_dir": _abs(pick("comfy_models_dir", "")),
         "default_model": str(pick("default_model", "") or ""),
+        "auto_backup_dir": _abs(pick("auto_backup_dir", "")),
         "os.makedirs": data_dir,
     }
 
@@ -504,6 +505,7 @@ def _finalize_task(tid, item):
         with LOCK:
             META["videos"][video] = meta
             _save_meta()
+        _backup_video(video)
     return {"status": "done", "video": video}
 
 
@@ -1259,6 +1261,7 @@ def videos():
                     "gen_seconds": m.get("gen_seconds"), "end_frame": m.get("end_frame"),
                     "model": m.get("model"), "model_label": m.get("model_label"),
                     "lora": m.get("lora"), "lora_label": m.get("lora_label"),
+                    "batch": m.get("batch"),
                     "postproc": m.get("postproc"), "src": m.get("src"),
                     "merged": m.get("merged"), "segments": m.get("segments"), "star": m.get("star")})
     return jsonify(out)
@@ -1675,8 +1678,9 @@ def _last_frame_upload(video_name):
     fd, tmp = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     try:
-        r = subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-sseof", "-0.05",
-                            "-i", path, "-frames:v", "1", tmp], timeout=30)
+        # reverse 滤镜取最后一帧：ffmpeg 8 上 -sseof 输入级快进 seek 对短片段会静默产出 0 帧
+        r = subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-i", path,
+                            "-vf", "reverse", "-frames:v", "1", tmp], timeout=120)
         if r.returncode != 0 or os.path.getsize(tmp) == 0:
             return None
         with open(tmp, "rb") as f:
@@ -1707,6 +1711,7 @@ def _record_meta(video_name, prompt, w, h, length, steps, turbo, i2v, seg, chain
             "chain": chain_id, "segment": seg, "time": int(time.time()),
         }
         _save_meta()
+    _backup_video(video_name)
 
 
 def run_auto_job(job_id, p):
@@ -1719,8 +1724,9 @@ def run_auto_job(job_id, p):
             if job.get("cancel"):
                 job["status"] = "cancelled"
                 return
+            seg_prompt = p["prompts"][i] if p.get("multi") else p["prompt"]
             actual_seed = (p["seed"] + i) if p["seed"] else random.randint(1, 2 ** 31 - 1)
-            wf = build_workflow(p["prompt"], p["width"], p["height"], p["length"], actual_seed,
+            wf = build_workflow(seg_prompt, p["width"], p["height"], p["length"], actual_seed,
                                 p["steps"], prev_image, None, p["turbo"], p["sampler"], p["scheduler"],
                                 {"filename": p["model"], "kind": p["model_kind"]}, p.get("lora") or None)
             try:
@@ -1747,10 +1753,11 @@ def run_auto_job(job_id, p):
                     job["phase"] = "concat-partial"
                 return
             job["videos"].append(vid)
-            _record_meta(vid, p["prompt"], p["width"], p["height"], p["length"], p["steps"],
+            _record_meta(vid, seg_prompt, p["width"], p["height"], p["length"], p["steps"],
                          p["turbo"], i > 0, i + 1, job_id, gen_seconds=round(time.time() - seg_t0),
                          model=p.get("model"), model_label=p.get("model_label"),
                          lora=p.get("lora"), lora_label=p.get("lora_label"))
+            _backup_video(vid)
             if i < job["total"] - 1:
                 job["phase"] = "extracting"
                 prev_image = _last_frame_upload(vid)
@@ -1783,12 +1790,15 @@ def run_auto_job(job_id, p):
                 job["merged"] = out_name
                 with LOCK:
                     META["videos"][out_name] = {
-                        "prompt": p["prompt"] + f"（自动续写 {job['total']} 段长片）", "seed": None,
+                        "prompt": (p["prompt"] if not p.get("multi") else p["prompts"][0]) +
+                                  f"（{'智能长片' if p.get('multi') else '自动续写'} {job['total']} 段长片）",
+                        "seed": None,
                         "width": p["width"], "height": p["height"], "length": None,
                         "duration": _probe_duration(os.path.join(OUTPUT, out_name)),
                         "merged": True, "chain": job_id, "time": int(time.time()),
                     }
                     _save_meta()
+                _backup_video(out_name)
             else:
                 job["error"] = "拼接失败（各段仍保留在历史中）"
         job["status"] = "done"
@@ -1800,14 +1810,26 @@ def run_auto_job(job_id, p):
 @app.route("/api/autochain", methods=["POST"])
 def autochain():
     data = request.json or {}
+    raw = data.get("prompts")
+    lines = []
+    if isinstance(raw, list):
+        lines = [str(x).strip()[:1000] for x in raw if str(x).strip()]
     prompt = (data.get("prompt") or "").strip()
-    if not prompt:
+    if not lines and prompt:
+        lines = [prompt]
+    if not lines:
         return jsonify({"ok": False, "error": "请输入提示词"})
     with LOCK_AUTO:
         active = [j for j in AUTO_JOBS.values() if j.get("status") == "running"]
         if active:
             return jsonify({"ok": False, "error": "已有一个自动续写任务在进行，请等它完成或点取消"})
-    total = max(2, min(8, int(data.get("segments", 3) or 3)))
+    multi = len(lines) > 1
+    if multi:
+        if len(lines) > 8:
+            return jsonify({"ok": False, "error": "智能长片最多 8 段（每行一段提示词）"})
+        total = len(lines)
+    else:
+        total = max(2, min(8, int(data.get("segments", 3) or 3)))
     width = int(data.get("width", 864)); height = int(data.get("height", 480))
     length = int(data.get("length", 124))
     tokens = width * height * length
@@ -1827,7 +1849,8 @@ def autochain():
         lora_fn, lora_steps, lora_label = _resolve_lora(data.get("lora"))
     except LookupError as e:
         return jsonify({"ok": False, "error": str(e)})
-    p = {"prompt": prompt, "width": width, "height": height, "length": length,
+    p = {"prompt": lines[0], "prompts": lines, "multi": multi,
+         "width": width, "height": height, "length": length,
          "steps": lora_steps or (int(prof["steps_fixed"]) if prof.get("steps_fixed")
                                  else max(4, min(20, int(data.get("steps", 8) or 8)))),
          "seed": int(data.get("seed", 0) or 0),
@@ -1838,7 +1861,7 @@ def autochain():
     job_id = f"chain_{int(time.time()*1000):x}"
     AUTO_JOBS[job_id] = {"total": total, "status": "starting", "params": {k: v for k, v in p.items()}}
     threading.Thread(target=run_auto_job, args=(job_id, p), daemon=True).start()
-    return jsonify({"ok": True, "job_id": job_id, "total": total,
+    return jsonify({"ok": True, "job_id": job_id, "total": total, "multi": multi,
                     "width": width, "height": height, "length": length})
 
 
@@ -1866,12 +1889,26 @@ PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110, "concat": 30}  # 自动后处理
 def _batch_save():
     try:
         job = BATCH_JOBS.get(_BATCH_LAST_ID)
-        if job and job.get("status") != "running":
+        if job and job.get("status") not in ("running", "scheduled"):
             job["conn_retry"] = 0  # 已结束的批次不再显示过期重试提示
         tmp = BATCH_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"job": job}, f, ensure_ascii=False)
         os.replace(tmp, BATCH_FILE)
+    except Exception:
+        pass
+
+
+def _backup_video(name):
+    """成片入库后自动备份到 auto_backup_dir（配置为空则跳过；失败不影响主流程）"""
+    d = CONFIG.get("auto_backup_dir") or ""
+    if not d or not name:
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+        src = os.path.join(OUTPUT, name)
+        if os.path.isfile(src) and not os.path.exists(os.path.join(d, name)):
+            shutil.copy2(src, os.path.join(d, name))
     except Exception:
         pass
 
@@ -1980,6 +2017,24 @@ def run_batch_job(job_id):
     job = BATCH_JOBS[job_id]
     p = job["params"]
     try:
+        # 定时启动：到点前只等待（可随时取消），重启后由 _batch_restore 重新挂回
+        if p.get("start_at") and p["start_at"] > time.time():
+            job["status"] = "scheduled"
+            _batch_save()
+            while time.time() < p["start_at"]:
+                if job.get("cancel"):
+                    job["status"] = "cancelled"
+                    job["current"] = None
+                    _batch_save()
+                    return
+                time.sleep(1)  # 粒度 1s：取消要快速生效（取消期间新建批次会被单实例限制挡住）
+            if job.get("cancel"):
+                job["status"] = "cancelled"
+                _batch_save()
+                return
+            job["status"] = "running"
+            job["eta_end"] = int(time.time() + len(job["queue"]) * (job.get("eta_seconds_per") or 0))
+            _batch_save()
         while True:
             if job.get("cancel"):
                 job["status"] = "cancelled"
@@ -2107,7 +2162,7 @@ def _batch_restore():
     if not job or not job.get("id"):
         return
     _BATCH_LAST_ID = job["id"]
-    if job.get("status") != "running":
+    if job.get("status") in ("done", "cancelled", "error"):
         BATCH_JOBS[job["id"]] = job
         return
     job["resumed"] = True
@@ -2115,7 +2170,7 @@ def _batch_restore():
     job["pending_tid"] = job.get("current_tid")
     job.setdefault("img_names", {})
     BATCH_JOBS[job["id"]] = job
-    print(f"[panel] 恢复通宵批次 {job['id']}：剩余 {len(job.get('queue') or [])} 个任务")
+    print(f"[panel] 恢复通宵批次 {job['id']}（{job['status']}）：剩余 {len(job.get('queue') or [])} 个任务")
     threading.Thread(target=run_batch_job, args=(job["id"],), daemon=True).start()
 
 
@@ -2132,9 +2187,13 @@ def batch_start():
     total = len(prompts) * per
     if total > BATCH_MAX_TASKS:
         return jsonify({"ok": False, "error": f"共 {total} 个任务，超出单批上限 {BATCH_MAX_TASKS}（减少提示词或种子数）"})
+    # 定时启动：start_at 为未来时刻（最多 7 天内），0/缺省=立即（先校验，避免白传图片）
+    start_at = int(data.get("start_at", 0) or 0)
+    if start_at and not (time.time() < start_at <= time.time() + 7 * 86400):
+        return jsonify({"ok": False, "error": "定时时间无效（需在 7 天内的未来时刻）"})
     with BATCH_LOCK:
-        if any(j.get("status") == "running" for j in BATCH_JOBS.values()):
-            return jsonify({"ok": False, "error": "已有一个通宵批次在跑，可先停止或等它结束"})
+        if any(j.get("status") in ("running", "scheduled") for j in BATCH_JOBS.values()):
+            return jsonify({"ok": False, "error": "已有一个通宵批次在排队/运行，可先停止或等它结束"})
     width = int(data.get("width", 864))
     height = int(data.get("height", 480))
     length = int(data.get("length", 124))
@@ -2180,6 +2239,8 @@ def batch_start():
     queue = [[prompt, random.randint(1, 2 ** 31 - 1), (i if i < len(images) else None)]
              for i, prompt in enumerate(prompts) for _ in range(per)]
     per_sec = _estimate_seconds_per(p) + (PP_EST.get("concat", 0) if p["auto_concat"] else 0)
+    if start_at:
+        p["start_at"] = start_at
     job_id = f"batch_{int(time.time() * 1000):x}"
     job = {"id": job_id, "status": "running", "created": int(time.time()),
            "prompts_total": len(prompts), "total": total,
@@ -2187,7 +2248,7 @@ def batch_start():
            "queue": queue, "current": None, "current_tid": None,
            "img_names": img_names, "merged": None,
            "params": p, "eta_seconds_per": per_sec,
-           "eta_end": int(time.time() + total * per_sec),
+           "eta_end": int((start_at or time.time()) + total * per_sec),
            "conn_retry": 0, "cancel": False, "error": ""}
     with BATCH_LOCK:
         BATCH_JOBS[job_id] = job
@@ -2225,8 +2286,8 @@ def batch_active():
 @app.route("/api/batch/<job_id>/cancel", methods=["POST"])
 def batch_cancel(job_id):
     job = BATCH_JOBS.get(job_id)
-    if not job or job.get("status") != "running":
-        return jsonify({"ok": False, "error": "没有正在运行的通宵批次"})
+    if not job or job.get("status") not in ("running", "scheduled"):
+        return jsonify({"ok": False, "error": "没有正在排队/运行的通宵批次"})
     job["cancel"] = True
     return jsonify({"ok": True, "status": "stopping"})
 
