@@ -67,6 +67,8 @@
 
 ## 快速开始
 
+> 让 AI 智能体代劳？本仓库自带部署技能：把 `skills/minimax-h3-panel-deploy/` 拷入智能体的技能目录（如 `~/.agents/skills/`），之后直接说「帮我部署 H3 面板」即可——技能里包含环境体检脚本、逐步安装流程与实测排障手册。
+
 ```bash
 git clone https://github.com/hongjiahao371-pixel/minimax-h3-panel.git
 cd minimax-h3-panel
