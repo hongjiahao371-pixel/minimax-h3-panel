@@ -1477,6 +1477,70 @@ def optimize():
     return jsonify({"ok": True, "optimized": local_optimize(prompt, variant), "mode": "本地规则"})
 
 
+def llm_split_prompts(text, cfg, count):
+    """用云端 LLM 把一段长文拆成多条场景提示词"""
+    sys_prompt = (
+        f"你是专业的 AI 视频分镜师。把用户的一段故事/描述拆分成 {count} 条独立的视频生成提示词（每个镜头一条）。"
+        "要求：每条都是完整独立的场景描述（含主体、动作、镜头运动、氛围，保留故事里的关键细节），"
+        "60 字以内；按叙事顺序排列，前后衔接自然但每条都能单独生成；"
+        "只输出这 {n} 行提示词本身，不要编号、引号、解释或任何多余文字。".replace("{n}", str(count)))
+    r = requests.post(
+        cfg["api_base"].rstrip("/") + "/chat/completions",
+        headers={"Authorization": "Bearer " + cfg["api_key"]},
+        json={"model": cfg.get("api_model") or "gpt-4o-mini",
+              "messages": [{"role": "system", "content": sys_prompt},
+                           {"role": "user", "content": text}],
+              "temperature": 0.5, "max_tokens": 1200},
+        timeout=40)
+    r.raise_for_status()
+    content = r.json()["choices"][0]["message"]["content"]
+    scenes = []
+    for ln in content.splitlines():
+        ln = ln.strip().lstrip("0123456789.、·-–—）) ：: ")
+        ln = ln.strip(chr(34) + chr(39) + "“”‘’")
+        if len(ln) >= 4:
+            scenes.append(ln)
+    if len(scenes) < 2:
+        raise ValueError("拆分结果过少")
+    return scenes
+
+
+def local_split_prompts(text, count=None):
+    """无 LLM 时的规则拆分：按句读切句，再按长度均衡分组"""
+    import re as _re
+    sents = [s.strip("，,、 ") for s in _re.split(r"[。！？!?；;\n]+", text) if len(s.strip("，,、 ")) >= 2]
+    if not sents:
+        return [text.strip()] if text.strip() else []
+    if not count:
+        count = max(2, min(8, max(1, len(text) // 80)))
+    count = min(count, len(sents))
+    groups, lens = [[] for _ in range(count)], [0] * count
+    for s in sents:  # 贪心：轮流入最短组，让各段长度均衡
+        i = lens.index(min(lens))
+        groups[i].append(s)
+        lens[i] += len(s)
+    return ["，".join(g) + "。" for g in groups if g]
+
+
+@app.route("/api/split_prompts", methods=["POST"])
+def split_prompts():
+    data = request.json or {}
+    text = (data.get("text") or "").strip()
+    if len(text) < 10:
+        return jsonify({"ok": False, "error": "内容太短，直接生成就行，不用拆分"})
+    count = int(data.get("count", 0) or 0)
+    count = max(2, min(BATCH_MAX_PROMPTS, count)) if count else None
+    cfg = _load_cfg()
+    if cfg.get("api_base") and cfg.get("api_key"):
+        try:
+            scenes = llm_split_prompts(text, cfg, count or max(2, min(8, len(text) // 80 or 2)))
+            return jsonify({"ok": True, "scenes": scenes, "mode": "云端 LLM"})
+        except Exception as e:
+            return jsonify({"ok": True, "scenes": local_split_prompts(text, count),
+                            "mode": f"本地规则（云端失败：{str(e)[:50]}）"})
+    return jsonify({"ok": True, "scenes": local_split_prompts(text, count), "mode": "本地规则（按句读均衡拆分）"})
+
+
 @app.route("/api/settings", methods=["GET", "POST"])
 def settings():
     if request.method == "GET":
@@ -1752,9 +1816,12 @@ PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110, "concat": 30}  # 自动后处理
 
 def _batch_save():
     try:
+        job = BATCH_JOBS.get(_BATCH_LAST_ID)
+        if job and job.get("status") != "running":
+            job["conn_retry"] = 0  # 已结束的批次不再显示过期重试提示
         tmp = BATCH_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"job": BATCH_JOBS.get(_BATCH_LAST_ID)}, f, ensure_ascii=False)
+            json.dump({"job": job}, f, ensure_ascii=False)
         os.replace(tmp, BATCH_FILE)
     except Exception:
         pass

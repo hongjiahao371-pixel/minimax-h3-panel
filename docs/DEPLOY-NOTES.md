@@ -38,6 +38,10 @@
   `_upload_batch_image` 按批次画幅 cover 裁剪上传（全批同尺寸→合集可无损 copy 拼接）；
   图片在批次受理时一次性上传（base64 不进 batch.json，避免每次落盘放大文件）。
   清理策略硬编码：保留星标 + 最近 7 天（CLEANUP_KEEP_DAYS）
+- **v7.1 长文拆分**：`/api/split_prompts` 复用提示词优化的 llm_config（高级选项里那组 API Base/Key）；
+  LLM 按分镜拆（system prompt 要求逐行输出），解析时剥编号/引号，<2 条视为失败回落；
+  无 LLM 用规则兜底（按 。！？；换行 切句 → 贪心长度均衡分组），默认段数 = 长度/80 夹在 2~8。
+  前端拆分结果可编辑后替换/追加到批量列表
 - 2026-09-18 时点：**3080 显卡未装回**，comfyui.service 处于 CUDA 缺失崩溃循环（已手动 stop，
   enabled 保留——装回显卡后 `systemctl start comfyui` 即恢复）；生成类端到端验证待显卡回装后补
 - **v6.0 通宵批量**：批次状态持久化在 `panel/data/batch.json`（每任务落盘一次）；面板重启时

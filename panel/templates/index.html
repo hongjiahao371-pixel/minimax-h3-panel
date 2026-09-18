@@ -452,6 +452,13 @@ details.adv summary:hover{color:var(--ink2)}
 .brow .go:disabled{opacity:.55;cursor:default}
 .brow .cancel{padding:10px 18px;border:1px solid rgba(224,82,82,.45);border-radius:12px;
   background:rgba(224,82,82,.08);color:#c93131;font-size:12.5px;cursor:pointer}
+.brow .ghost{padding:10px 18px;border:1px solid rgba(120,140,180,.32);border-radius:12px;
+  background:rgba(255,255,255,.6);color:var(--ink2);font-size:12.5px;cursor:pointer;transition:.13s}
+.brow .ghost:hover{border-color:rgba(59,130,246,.55);color:#14419f;background:#fff}
+.storbox textarea{width:100%;min-height:150px;padding:12px 14px;border:1px solid rgba(120,140,180,.32);
+  border-radius:12px;background:rgba(255,255,255,.7);font-size:12.5px;line-height:1.6;color:var(--ink);
+  outline:none;resize:vertical;font-family:inherit}
+.storbox textarea:focus{border-color:rgba(59,130,246,.6);background:#fff}
 .bprog-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .bprog-head b{font-size:14px;color:var(--ink)}
 .bstat{font-size:12.5px;color:var(--ink2)}
@@ -787,13 +794,17 @@ details.adv summary:hover{color:var(--ink2)}
       </div>
       <div class="brow">
         <button class="go" id="batchGo" type="button">🌙 开始通宵跑</button>
+        <button class="ghost" id="splitBtn" type="button">✂️ 长文拆分成多条</button>
         <button class="cancel" id="batchCancel" hidden>停止批次（当前片跑完后停）</button>
+        <span class="muted" style="font-size:12px">参数沿用创作台（画幅 / 画质 / 时长 / 步数 / 模型 / 加速 / 自动处理）</span>
       </div>
     </div>
     <div id="batchProg" hidden>
       <div class="bprog-head">
         <b id="batchTitle">批次进行中</b>
         <span id="batchMsg" class="muted" style="font-size:12px"></span>
+        <span style="flex:1"></span>
+        <button class="mgmt" id="batchHide" hidden type="button">收起</button>
       </div>
       <div class="mprog" style="margin:8px 0 6px"><i id="batchFill" style="width:0%"></i></div>
       <div class="bstat" id="batchStat"></div>
@@ -845,6 +856,21 @@ details.adv summary:hover{color:var(--ink2)}
     <div class="storactions">
       <button class="quiet" id="storRefresh" type="button">刷新</button>
       <button id="storClean" type="button">清理旧作品</button>
+    </div>
+  </div>
+</div>
+
+<div class="cmp" id="splitOv" hidden>
+  <button class="close" id="splitClose" type="button">✕</button>
+  <div class="storbox">
+    <div class="mh-title">✂️ 长提示词拆分</div>
+    <div class="muted" style="font-size:12px" id="splitMode"></div>
+    <textarea id="splitOut" rows="9" placeholder="拆分结果（每行一条场景提示词，可直接编辑）"></textarea>
+    <div class="muted" style="font-size:11px">按叙事顺序排列，每条都能独立生成；确认前可手动增删改。配「跑完自动拼接成合集」可以得到一条完整故事片。</div>
+    <div class="storactions">
+      <button class="quiet" id="splitCancel2" type="button">取消</button>
+      <button class="quiet" id="splitAppend" type="button">追加到批量列表</button>
+      <button id="splitReplace" type="button">替换批量列表</button>
     </div>
   </div>
 </div>
@@ -2084,8 +2110,13 @@ $('#navBatch').addEventListener('click',()=>{
   $('#batchSec').scrollIntoView({behavior:'smooth',block:'start'});
 });
 function renderBatch(j){
-  $('#batchProg').hidden=false;
+  window._lastBatchJob=j;
   const running=j.status==='running';
+  if(!running&&localStorage.getItem('h3batchHidden')===j.id){
+    $('#batchProg').hidden=true;$('#batchForm').style.display='';return;
+  }
+  $('#batchProg').hidden=false;
+  $('#batchHide').hidden=running;
   $('#batchCancel').hidden=!running;
   $('#batchForm').style.display=running?'none':'';
   let msg='';
@@ -2097,7 +2128,7 @@ function renderBatch(j){
   const finished=(j.done||0)+(j.failed||0);
   $('#batchFill').style.width=(j.total?Math.round(finished/j.total*100):0)+'%';
   const bits=['<b>'+finished+'/'+j.total+'</b> 个任务','<b>'+(j.done||0)+'</b> 成功','<b>'+(j.failed||0)+'</b> 失败'];
-  if(j.conn_retry)bits.push('<span style="color:#b45309">⚠ ComfyUI 连接中断，重试中（第 '+j.conn_retry+'/30 次）</span>');
+  if(running&&j.conn_retry)bits.push('<span style="color:#b45309">⚠ ComfyUI 连接中断，重试中（第 '+j.conn_retry+'/30 次）</span>');
   if(running&&j.eta_end)bits.push('预计 <b>'+fmtClock(j.eta_end)+'</b> 跑完');
   if(j.merged)bits.push('🎞 合集：<b><a href="/video/'+j.merged+'" target="_blank" style="color:#14419f">'+j.merged+'</a></b>');
   $('#batchStat').innerHTML=bits.join(' · ');
@@ -2154,6 +2185,7 @@ $('#batchGo').addEventListener('click',()=>{
   .then(r=>r.json()).then(d=>{
     $('#batchGo').disabled=false;$('#batchGo').textContent='🌙 开始通宵跑';
     if(!d.ok){alert(d.error||'提交失败');return;}
+    try{localStorage.removeItem('h3batchHidden')}catch(_){}
     _batchSeenCnt=0;
     pollBatch();
   }).catch(e=>{alert('请求失败: '+e);$('#batchGo').disabled=false;$('#batchGo').textContent='🌙 开始通宵跑';});
@@ -2164,6 +2196,52 @@ $('#batchCancel').addEventListener('click',()=>{
     if(!confirm('停止通宵批次？当前正在跑的这段会跑完，之后不再继续。'))return;
     fetch('/api/batch/'+encodeURIComponent(d.job.id)+'/cancel',{method:'POST'}).then(()=>pollBatch());
   });
+});
+$('#batchHide').addEventListener('click',()=>{
+  const j=window._lastBatchJob;
+  if(j)try{localStorage.setItem('h3batchHidden',j.id)}catch(_){}
+  $('#batchProg').hidden=true;$('#batchForm').style.display='';
+});
+function applySplit(lines,replace){
+  const clean=lines.map(s=>s.trim()).filter(Boolean);
+  if(replace){$('#batchPrompts').value=clean.join('\n');}
+  else{
+    const have=new Set(batchLines());
+    const add=clean.filter(s=>!have.has(s));
+    const cur=$('#batchPrompts').value.trimEnd();
+    $('#batchPrompts').value=cur?(cur+'\n'+add.join('\n')):add.join('\n');
+  }
+  $('#splitOv').hidden=true;
+  updBatchSummary();
+  $('#batchSec').scrollIntoView({behavior:'smooth',block:'start'});
+}
+$('#splitBtn').addEventListener('click',()=>{
+  const text=$('#batchPrompts').value.trim();
+  if(text.length<10){alert('先把长段提示词粘贴进来（至少 10 字），再点拆分');return;}
+  $('#splitOv').hidden=false;
+  $('#splitOut').value='拆分中…';$('#splitMode').textContent='';
+  $('#splitBtn').disabled=true;
+  fetch('/api/split_prompts',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text})})
+  .then(r=>r.json()).then(d=>{
+    $('#splitBtn').disabled=false;
+    if(!d.ok){alert(d.error||'拆分失败');$('#splitOv').hidden=true;return;}
+    $('#splitOut').value=(d.scenes||[]).join('\n');
+    $('#splitMode').textContent='拆分方式：'+(d.mode||'')+' · 共 '+(d.scenes||[]).length+' 条';
+  }).catch(()=>{$('#splitBtn').disabled=false;$('#splitOv').hidden=true;alert('拆分请求失败');});
+});
+$('#splitClose').addEventListener('click',()=>{$('#splitOv').hidden=true;});
+$('#splitCancel2').addEventListener('click',()=>{$('#splitOv').hidden=true;});
+$('#splitOv').addEventListener('click',e=>{if(e.target.id==='splitOv')$('#splitOv').hidden=true;});
+$('#splitReplace').addEventListener('click',()=>{
+  const lines=$('#splitOut').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!lines.length){alert('拆分结果为空');return;}
+  applySplit(lines,true);
+});
+$('#splitAppend').addEventListener('click',()=>{
+  const lines=$('#splitOut').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!lines.length){alert('拆分结果为空');return;}
+  applySplit(lines,false);
 });
 (async function reattachBatch(){
   try{
