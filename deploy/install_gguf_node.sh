@@ -24,6 +24,35 @@ echo "[gguf] 安装 python 依赖 gguf"
   || "$PY" -m pip install gguf \
   || "$PY" -m pip install --user gguf
 
+# 给 ComfyUI-GGUF 的架构识别表补 MiniMax-H3（社区 H3 GGUF 均为无元数据裸张量格式，
+# 靠特征键探测架构；截至 2026-09 主干识别表尚无 H3，不打补丁会报 Unknown model architecture）
+CONVERT="$COMFY_DIR/custom_nodes/ComfyUI-GGUF/tools/convert.py"
+if [ -f "$CONVERT" ] && ! grep -q "ModelMiniMaxH3" "$CONVERT"; then
+  python3 - "$CONVERT" <<'PYEOF'
+import sys
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+cls = '''class ModelMiniMaxH3(ModelTemplate):
+    arch = "minimax_h3"
+    keys_detect = [
+        ("adaln_t_table",),
+        ("audio_patch_proj.weight",),
+    ]
+
+arch_list = [ModelFlux, ModelSD3, ModelAura, ModelHiDream, CosmosPredict2,
+             ModelLTXV, ModelHyVid, ModelWan, ModelSDXL, ModelSD1, ModelLumina2, ModelMiniMaxH3]'''
+import re
+m = re.search(r"arch_list = \[ModelFlux[^\]]*\]", src)
+if m:
+    open(p, "w", encoding="utf-8").write(src.replace(m.group(0), cls))
+    print("[gguf] 已给 convert.py 打 MiniMax-H3 识别补丁")
+else:
+    print("[gguf] 警告：未找到 arch_list，跳过补丁（新版可能已原生支持 H3）")
+PYEOF
+else
+  echo "[gguf] convert.py 已含 H3 补丁或文件不存在，跳过"
+fi
+
 cat <<'NOTE'
 
 [gguf] 安装完成。请重启 ComfyUI 后验证：
