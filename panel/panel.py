@@ -1430,16 +1430,24 @@ def local_optimize(prompt, variant=0):
 
 
 def llm_optimize(prompt, cfg, variant=0):
-    """可选：调用 OpenAI 兼容接口优化提示词"""
-    sys_prompt = ("你是专业的 AI 视频生成提示词工程师。把用户的简短想法扩写成一条适合视频生成模型的中文提示词："
-                  "保留原意，补充主体细节、动作过程、镜头运动、光线、氛围和画质描述，控制在 90 字以内。"
-                  "只输出优化后的提示词本身，不要任何解释、引号或前后缀。")
+    """可选：调用 OpenAI 兼容接口，按 H3 的提示词规范优化"""
+    sys_prompt = (
+        "你是 MiniMax-H3 视频模型的提示词工程师。把用户的简短想法改写成一条 H3 生成提示词，规则：\n"
+        "1. 保留原意，只做正向描述：写画面中存在的事物、动作和声音，绝不使用否定式表达"
+        "（如「没有」「不要」「避免」「无人」——H3 没有负面提示词机制，否定词反而会把不该出现的东西画出来）；\n"
+        "2. 一个片段=一个连续镜头：只描述单一场景内的主体、动作过程、镜头运动（推/拉/摇/移/跟）、"
+        "光线与氛围，不写镜头切换或转场；\n"
+        "3. H3 原生生成声音：可自然融入一句环境音、音效或角色对白（如「伴随海浪与海鸥声」「她轻声说：早安」），"
+        "与画面内容呼应；\n"
+        "4. 中文书写，90 字以内，单句连贯；\n"
+        "5. 只输出提示词本身，不要任何解释、引号或前后缀。"
+        + (f"（变化风格第 {variant + 1} 版）" if variant else ""))
     r = requests.post(
         cfg["api_base"].rstrip("/") + "/chat/completions",
         headers={"Authorization": "Bearer " + cfg["api_key"]},
         json={"model": cfg.get("api_model") or "gpt-4o-mini",
               "messages": [{"role": "system", "content": sys_prompt},
-                           {"role": "user", "content": prompt + (f"（变化风格第 {variant + 1} 版）" if variant else "")}],
+                           {"role": "user", "content": prompt}],
               "temperature": 0.7, "max_tokens": 300},
         timeout=25)
     r.raise_for_status()
@@ -1448,6 +1456,25 @@ def llm_optimize(prompt, cfg, variant=0):
     if not text:
         raise ValueError("empty response")
     return text
+
+
+_NEG_WORDS = ("不要", "不能", "不可", "避免", "禁止", "别让", "别出现", "没有", "无人", "空无", "不会有")
+
+
+def _h3_prompt_guard(text):
+    """H3 提示词轻量校验：超长按句截断、否定式表达提醒。返回 (清理后文本, 警告列表)"""
+    warns = []
+    text = text.strip()
+    if len(text) > 160:
+        cut = max(text.rfind("。", 0, 160), text.rfind("，", 0, 160), text.rfind("；", 0, 160))
+        text = (text[:cut] if cut > 40 else text[:160]).rstrip("。，,；、 ") + "。"
+        warns.append("提示词偏长，已按句截断到 160 字以内")
+    for w in _NEG_WORDS:
+        if w in text:
+            warns.append(f"检测到否定式表达「{w}」：H3 没有负面提示词机制（正负向共用同一提示词），"
+                         "否定的事物反而可能被画出来，建议改写成正向描述")
+            break
+    return text, warns
 
 
 def _load_cfg():
@@ -1469,21 +1496,27 @@ def optimize():
     if cfg.get("api_base") and cfg.get("api_key"):
         try:
             text = llm_optimize(prompt, cfg, variant)
-            return jsonify({"ok": True, "optimized": text, "mode": "云端LLM"})
+            text, warns = _h3_prompt_guard(text)
+            return jsonify({"ok": True, "optimized": text, "warnings": warns, "mode": "云端LLM"})
         except Exception as e:
             # 云端失败回落本地
-            return jsonify({"ok": True, "optimized": local_optimize(prompt, variant),
+            text, warns = _h3_prompt_guard(local_optimize(prompt, variant))
+            return jsonify({"ok": True, "optimized": text, "warnings": warns,
                             "mode": "本地规则（云端失败: %s）" % str(e)[:60]})
-    return jsonify({"ok": True, "optimized": local_optimize(prompt, variant), "mode": "本地规则"})
+    text, warns = _h3_prompt_guard(local_optimize(prompt, variant))
+    return jsonify({"ok": True, "optimized": text, "warnings": warns, "mode": "本地规则"})
 
 
 def llm_split_prompts(text, cfg, count):
     """用云端 LLM 把一段长文拆成多条场景提示词"""
     sys_prompt = (
-        f"你是专业的 AI 视频分镜师。把用户的一段故事/描述拆分成 {count} 条独立的视频生成提示词（每个镜头一条）。"
-        "要求：每条都是完整独立的场景描述（含主体、动作、镜头运动、氛围，保留故事里的关键细节），"
-        "60 字以内；按叙事顺序排列，前后衔接自然但每条都能单独生成；"
-        "只输出这 {n} 行提示词本身，不要编号、引号、解释或任何多余文字。".replace("{n}", str(count)))
+        f"你是 MiniMax-H3 视频模型的分镜师。把用户的一段故事/描述拆分成 {count} 条独立的生成提示词（每个镜头一条）。"
+        "每条规则：\n"
+        "1. 完整独立的单一连续镜头场景：含主体、动作过程、镜头运动（推/拉/摇/移/跟）、光线氛围，不写镜头切换；\n"
+        "2. 只做正向描述，绝不出现「没有/不要/避免/无人」等否定式表达（H3 无负面提示词机制，否定词会被画出来）；\n"
+        "3. 可自然融入一句与画面呼应的声音描述（环境音/音效/简短对白），H3 原生生成声音；\n"
+        "4. 按叙事顺序排列、前后衔接自然，保留故事关键细节；每条 60 字以内、中文；\n"
+        f"5. 只输出这 {count} 行提示词本身，不要编号、引号、解释或任何多余文字。")
     r = requests.post(
         cfg["api_base"].rstrip("/") + "/chat/completions",
         headers={"Authorization": "Bearer " + cfg["api_key"]},
@@ -1534,11 +1567,18 @@ def split_prompts():
     if cfg.get("api_base") and cfg.get("api_key"):
         try:
             scenes = llm_split_prompts(text, cfg, count or max(2, min(8, len(text) // 80 or 2)))
-            return jsonify({"ok": True, "scenes": scenes, "mode": "云端 LLM"})
+            scenes, warns = [], []
+            for s in scenes:
+                s2, w = _h3_prompt_guard(s)
+                scenes.append(s2)
+                warns.extend(w)
+            return jsonify({"ok": True, "scenes": scenes, "warnings": sorted(set(warns)), "mode": "云端 LLM"})
         except Exception as e:
-            return jsonify({"ok": True, "scenes": local_split_prompts(text, count),
+            scenes = local_split_prompts(text, count)
+            return jsonify({"ok": True, "scenes": scenes, "warnings": [],
                             "mode": f"本地规则（云端失败：{str(e)[:50]}）"})
-    return jsonify({"ok": True, "scenes": local_split_prompts(text, count), "mode": "本地规则（按句读均衡拆分）"})
+    scenes = local_split_prompts(text, count)
+    return jsonify({"ok": True, "scenes": scenes, "warnings": [], "mode": "本地规则（按句读均衡拆分）"})
 
 
 @app.route("/api/settings", methods=["GET", "POST"])

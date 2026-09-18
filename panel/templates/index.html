@@ -271,6 +271,9 @@ details.adv summary:hover{color:var(--ink2)}
 .optbox .mini:hover{border-color:rgba(59,130,246,.55);color:#14419f;background:#fff}
 .optbox .mini.quiet{border:none;background:none}
 .opt-text{font-size:13px;line-height:1.65;color:var(--ink);margin:9px 0 6px;user-select:text}
+.opt-warn{margin:0 0 6px;color:#b45309;font-size:11px;line-height:1.5;
+  background:rgba(240,150,30,.09);border:1px solid rgba(240,150,30,.22);border-radius:8px;padding:5px 9px}
+.opt-warn[hidden]{display:none}
 
 /* ---------- 弹层（玻璃暗幕） ---------- */
 .modal{position:fixed;inset:0;background:rgba(30,36,55,.42);backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%);
@@ -544,6 +547,7 @@ details.adv summary:hover{color:var(--ink2)}
           </span>
         </div>
         <div class="opt-text" id="optText"></div>
+        <div class="opt-warn" id="optWarn" hidden></div>
         <span class="muted" style="font-size:11px">仅供参考：点「采用」填入输入框（可继续编辑）；不用就忽略或关闭</span>
       </div>
 
@@ -993,6 +997,9 @@ function runOptimize(force){
     if(seq!==optSeq||!d.ok)return;
     $('#optText').textContent=d.optimized;
     $('#optMode').textContent='· '+d.mode;
+    const w=d.warnings||[],ow=$('#optWarn');
+    ow.textContent=w.length?('⚠ '+w.join('；')):'';
+    ow.hidden=!w.length;
     $('#optbox').hidden=false;
   }).catch(()=>{});
 }
@@ -2227,7 +2234,8 @@ $('#splitBtn').addEventListener('click',()=>{
     $('#splitBtn').disabled=false;
     if(!d.ok){alert(d.error||'拆分失败');$('#splitOv').hidden=true;return;}
     $('#splitOut').value=(d.scenes||[]).join('\n');
-    $('#splitMode').textContent='拆分方式：'+(d.mode||'')+' · 共 '+(d.scenes||[]).length+' 条';
+    const w=d.warnings||[];
+    $('#splitMode').textContent='拆分方式：'+(d.mode||'')+' · 共 '+(d.scenes||[]).length+' 条'+(w.length?(' · ⚠ '+w.join('；')):'');
   }).catch(()=>{$('#splitBtn').disabled=false;$('#splitOv').hidden=true;alert('拆分请求失败');});
 });
 $('#splitClose').addEventListener('click',()=>{$('#splitOv').hidden=true;});
