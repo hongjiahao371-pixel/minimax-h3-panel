@@ -645,6 +645,7 @@ details.adv summary:hover{color:var(--ink2)}
             <option value="rife">🎞 自动 RIFE 插帧 ×2（48fps 顺滑）</option>
             <option value="x2">🔍 自动 AI 超分 ×2（约 1080p）</option>
             <option value="rife_x2">🚀 全链：插帧 → 超分（48fps + 1080p）</option>
+            <option value="afix">🎚 音频清理（降噪 + 响度标准化，纯 CPU 秒级）</option>
           </select>
         </div>
         <div>
@@ -1845,7 +1846,8 @@ ppMenu.id = 'ppMenu'; ppMenu.hidden = true;
 ppMenu.innerHTML = '<div class="ppm-title">AI 增强</div>' +
   '<button data-mode="rife" type="button">🎞 RIFE 插帧 ×2（48fps · 约1分钟）</button>' +
   '<button data-mode="x2" type="button">🔍 AI 超分 ×2（约1080p · 约2分钟）</button>' +
-  '<button data-mode="rife_x2" type="button">🚀 插帧→超分 全链（48fps+1080p · 约3分钟）</button>';
+  '<button data-mode="rife_x2" type="button">🚀 插帧→超分 全链（48fps+1080p · 约3分钟）</button>' +
+  '<button data-mode="afix" type="button">🎚 音频清理（降噪+响度 · 秒级）</button>';
 document.body.appendChild(ppMenu);
 document.getElementById('gallery').addEventListener('click', e => {
   const btn = e.target.closest('[data-act="enhance"]');

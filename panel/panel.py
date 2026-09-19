@@ -1146,7 +1146,9 @@ def cleanup_exec():
 POSTPROC_JOBS = {}  # job_id(pp_*) -> {status,mode,src,out,proc,label,t0,error}
 PP_PYTHON = CONFIG["python"]
 PP_CLI = os.path.join(CONFIG["postproc_dir"], "postproc_cli.py")
-PP_VRAM_NEED = {"rife": 2.5, "x2": 4.5, "rife_x2": 4.5}
+PP_VRAM_NEED = {"rife": 2.5, "x2": 4.5, "rife_x2": 4.5, "afix": 0}
+PP_LABEL = {"rife": "🪄 插帧 ×2", "x2": "🪄 AI 超分 ×2", "rife_x2": "🪄 插帧→超分 全链",
+            "afix": "🎚 音频清理（降噪+响度）"}
 
 
 def _vram_free_gb():
@@ -1206,8 +1208,37 @@ def _probe_dim(path):
     return int(w), int(h)
 
 
+def _pp_afix(src_path, out_path):
+    """音频清理（纯 CPU）：去低频隆隆 + FFT 降噪 + 响度标准化（短视频 -16LUFS）"""
+    t0 = time.time()
+    af = "highpass=f=80,afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11"
+    cmd = [FFMPEG, "-y", "-loglevel", "error", "-i", src_path,
+           "-c:v", "copy", "-af", af, "-c:a", "aac", "-b:a", "160k", "-ar", "48000", out_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if r.returncode != 0 or not os.path.isfile(out_path):
+        raise RuntimeError((r.stderr or "").strip()[-300:] or "音频清理失败")
+    return {"proc_seconds": round(time.time() - t0)}
+
+
 def _pp_run(name, mode, out_path):
-    """跑一次后处理 CLI 并把产物写入元数据"""
+    """跑一次后处理（GPU CLI 或 ffmpeg 音频清理）并把产物写入元数据"""
+    if mode == "afix":
+        info = _pp_afix(os.path.join(OUTPUT, name), out_path)
+        with LOCK:
+            sm = META["videos"].get(name, {})
+            META["videos"][os.path.basename(out_path)] = {
+                "prompt": sm.get("prompt") or name, "seed": sm.get("seed"),
+                "width": sm.get("width"), "height": sm.get("height"), "length": sm.get("length"),
+                "steps": sm.get("steps"), "turbo": sm.get("turbo"), "i2v": sm.get("i2v"),
+                "sampler": sm.get("sampler"), "scheduler": sm.get("scheduler"),
+                "model": sm.get("model"), "model_label": sm.get("model_label"),
+                "lora": sm.get("lora"), "lora_label": sm.get("lora_label"),
+                "has_ref": sm.get("has_ref"), "ref_size": sm.get("ref_size"),
+                "duration": _probe_duration(out_path), "postproc": mode, "src": name,
+                "gen_seconds": info.get("proc_seconds"), "time": int(time.time()),
+            }
+            _save_meta()
+        return info
     env = dict(os.environ)
     if CONFIG["postproc_home"]:
         env["HOME"] = CONFIG["postproc_home"]
@@ -1259,16 +1290,17 @@ def run_postproc(job_id, name, mode):
 def postproc():
     data = request.json or {}
     name = os.path.basename(data.get("name") or "")
-    mode = data.get("mode") if data.get("mode") in ("rife", "x2", "rife_x2") else None
+    mode = data.get("mode") if data.get("mode") in ("rife", "x2", "rife_x2", "afix") else None
     if not name or not mode:
         return jsonify({"ok": False, "error": "参数缺失"})
     if not os.path.isfile(os.path.join(OUTPUT, name)):
         return jsonify({"ok": False, "error": "视频不存在"})
     if name.startswith("merged_") and mode == "x2":
         return jsonify({"ok": False, "error": "拼接长片较长，暂不支持超分（可对单段超分后再拼接）"})
-    engine_err = _pp_engine_check(mode)
-    if engine_err:
-        return jsonify({"ok": False, "error": engine_err})
+    if mode != "afix":
+        engine_err = _pp_engine_check(mode)
+        if engine_err:
+            return jsonify({"ok": False, "error": engine_err})
     err = _ensure_vram(PP_VRAM_NEED[mode])
     if err:
         return jsonify({"ok": False, "error": err})
@@ -1276,7 +1308,7 @@ def postproc():
     if len(running) >= 2:
         return jsonify({"ok": False, "error": "后处理任务过多，请等当前任务完成"})
     job_id = f"pp_{int(time.time()*1000):x}"
-    label = {"rife": "🪄 插帧 ×2", "x2": "🪄 AI 超分 ×2", "rife_x2": "🪄 插帧→超分 全链"}[mode]
+    label = PP_LABEL[mode]
     POSTPROC_JOBS[job_id] = {"status": "running", "mode": mode, "src": name,
                              "label": label, "t0": time.time(), "error": ""}
     threading.Thread(target=run_postproc, args=(job_id, name, mode), daemon=True).start()
@@ -1934,7 +1966,7 @@ BATCH_LOCK = threading.Lock()
 _BATCH_LAST_ID = None
 BATCH_MAX_PROMPTS = 60
 BATCH_MAX_TASKS = 240
-PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110, "concat": 30}  # 自动后处理/拼接单任务秒级估算
+PP_EST = {"rife": 25, "x2": 85, "rife_x2": 110, "concat": 30, "afix": 4}  # 自动后处理/拼接单任务秒级估算
 
 
 def _batch_save():
@@ -1990,7 +2022,7 @@ def _batch_autopost(video, p, failures, prompt, seed):
     mode = p.get("autopost")
     if not mode or not video:
         return
-    eng = _pp_engine_check(mode)
+    eng = None if mode == "afix" else _pp_engine_check(mode)
     if eng:
         failures.append({"prompt": prompt, "seed": seed, "step": p["steps"],
                          "error": "成片已入库，自动处理跳过：" + eng})
@@ -2296,7 +2328,7 @@ def batch_start():
          "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True) and not lora_fn,
          "sampler": data.get("sampler") if data.get("sampler") in SAMPLERS else "euler",
          "scheduler": data.get("scheduler") if data.get("scheduler") in SCHEDS else "normal",
-         "autopost": data.get("autopost") if data.get("autopost") in ("rife", "x2", "rife_x2") else "",
+         "autopost": data.get("autopost") if data.get("autopost") in ("rife", "x2", "rife_x2", "afix") else "",
          "auto_concat": bool(data.get("auto_concat", False)),
          "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"],
          "model_family": prof.get("family"),
