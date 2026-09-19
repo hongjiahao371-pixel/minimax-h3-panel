@@ -253,8 +253,9 @@ def build_workflow(prompt, width, height, length, seed, steps, image_name=None, 
                     "inputs": {"lora_name": lora, "strength_model": 1.0, "model": ["1", 0]}}
         wf["7"]["inputs"]["model"] = ["16", 0]
     if turbo and not lora:
+        # 复用阈值 0.10 实测会产生整片"融化"伪影（2026-09-19 QC 对照确认），0.04 画质干净
         wf["5"] = {"class_type": "MiniMaxH3Cache", "inputs": {"model": ["1", 0],
-            "resuse_threshold": 0.10, "start_percent": 0.15, "end_percent": 0.9,
+            "resuse_threshold": 0.04, "start_percent": 0.15, "end_percent": 0.9,
             "max_steps": 2, "device": "auto", "verbose": False}}
         wf["7"]["inputs"]["model"] = ["5", 0]
     if image_name:
