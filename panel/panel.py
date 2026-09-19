@@ -1131,6 +1131,7 @@ def cleanup_exec():
     for f in cands:
         try:
             os.remove(os.path.join(OUTPUT, f["name"]))
+            _purge_poster(f["name"])
             with LOCK:
                 META["videos"].pop(f["name"], None)
             deleted += 1
@@ -1320,6 +1321,41 @@ def video(filename):
     return send_from_directory(OUTPUT, filename)
 
 
+# ---------------- 作品封面：ffmpeg 抽帧 + 磁盘缓存 ----------------
+POSTER_DIR = os.path.join(CONFIG["data_dir"], "posters")
+POSTER_LOCK = threading.Lock()
+
+
+@app.route("/poster/<path:filename>")
+def poster(filename):
+    """作品缩略图（懒生成，磁盘缓存）：替代 video preload 方案——浏览器不再为每张卡解码视频"""
+    name = os.path.basename(filename)
+    if not name.endswith(".mp4") or not os.path.isfile(os.path.join(OUTPUT, name)):
+        return ("not found", 404)
+    os.makedirs(POSTER_DIR, exist_ok=True)
+    out = os.path.join(POSTER_DIR, name[:-4] + ".jpg")
+    if not os.path.isfile(out):
+        with POSTER_LOCK:
+            if not os.path.isfile(out):  # 双检：并发首访只生成一次
+                src = os.path.join(OUTPUT, name)
+                ss = "1" if _probe_duration(src) > 2 else "0"
+                r = subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-ss", ss, "-i", src,
+                                    "-frames:v", "1", "-vf", "scale=480:-2", out], timeout=30)
+                if r.returncode != 0 or not os.path.isfile(out):
+                    return ("poster generation failed", 500)
+    resp = send_from_directory(POSTER_DIR, os.path.basename(out), max_age=86400)
+    return resp
+
+
+def _purge_poster(name):
+    try:
+        p = os.path.join(POSTER_DIR, os.path.basename(name)[:-4] + ".jpg")
+        if os.path.isfile(p):
+            os.remove(p)
+    except OSError:
+        pass
+
+
 @app.route("/api/videos")
 def videos():
     files = sorted(glob.glob(os.path.join(OUTPUT, "h3_video*.mp4")) +
@@ -1359,6 +1395,7 @@ def del_video(name):
         os.remove(path)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+    _purge_poster(name)
     with LOCK:
         META["videos"].pop(name, None)
         _save_meta()

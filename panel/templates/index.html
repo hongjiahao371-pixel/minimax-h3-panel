@@ -235,6 +235,7 @@ details.adv summary:hover{color:var(--ink2)}
 .vcard.sel{border-color:rgba(59,130,246,.65);box-shadow:0 0 0 3px rgba(59,130,246,.22),0 12px 34px rgba(59,130,246,.2)}
 .vcard .thumb{position:relative;display:block;background:#000;aspect-ratio:16/9;overflow:hidden;cursor:pointer}
 .vcard .thumb video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.vcard .thumb img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;background:linear-gradient(135deg,#1a2030,#232c44)}
 .vcard .dur{position:absolute;right:6px;bottom:6px;background:rgba(20,24,36,.66);color:#fff;font-size:10.5px;padding:2px 7px;border-radius:6px}
 .vcard .tag{position:absolute;left:6px;top:6px;background:rgba(20,24,36,.56);color:#fff;font-size:10px;padding:2px 7px;border-radius:6px}
 .vcard .ck{position:absolute;right:6px;top:6px;width:21px;height:21px;accent-color:var(--blue-deep);z-index:2}
@@ -1499,7 +1500,7 @@ function renderGallery(list){
    <div class="vcard ${selected.has(v.name)?'sel':''}" data-name="${v.name}">
      ${manageMode?`<input type="checkbox" class="ck" ${selected.has(v.name)?'checked':''}>`:''}
      <a class="thumb" href="#" data-act="open">
-       <video data-src="/video/${v.name}#t=0.6" muted preload="none"></video>
+       <img loading="lazy" data-src="/poster/${v.name}" alt="">
        ${v.duration?`<span class="dur">${v.duration}s</span>`:''}
        ${v.merged?`<span class="tag">拼接片</span>`:(v.i2v?`<span class="tag">${v.end_frame?'首尾定界':'图生视频'}</span>`:'')}
      <button class="starb ${v.star?'on':''}" data-act="star" type="button" title="收藏">${v.star?'★':'☆'}</button>
@@ -2478,7 +2479,7 @@ function askPanelPassword() {
 const _origRenderGallery = renderGallery;
 renderGallery = function(list) {
   _origRenderGallery(list);
-  const vids = [...document.querySelectorAll('#gallery .vcard video[data-src]')];
+  const vids = [...document.querySelectorAll('#gallery .vcard [data-src]')];
   if (!vids.length) return;
   if (!('IntersectionObserver' in window)) {
     vids.forEach(v => { v.src = v.dataset.src; delete v.dataset.src; });
