@@ -263,15 +263,18 @@ def build_workflow(prompt, width, height, length, seed, steps, image_name=None, 
             "max_steps": 2, "device": "auto", "verbose": False}}
         wf["7"]["inputs"]["model"] = ["5", 0]
     if (model_profile or {}).get("family") == "ref2va":
-        # Ref2VA：节点 6 换成参考图条件生成（输出同为 positive+latent，下游接线不变）
+        # Ref2VA：节点 6 换成参考图条件生成（输出同为 positive+latent，下游接线不变）。
+        # 角色图为 slot0；接龙尾帧作为 slot1（身份+连续性兼得，互不覆盖）
         wf["6"] = {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
             "clip": ["2", 0], "vae": ["3", 0], "audio_vae": ["4", 0],
             "prompt": prompt, "width": w, "height": h, "length": length,
             "ref_image_size": ref_image_size if ref_image_size in ("match", "max") else "match"}}
-        if ref_image_name:
-            wf["14"] = {"class_type": "LoadImage", "inputs": {"image": ref_image_name}}
-            wf["6"]["inputs"]["ref_images.ref_image_0"] = ["14", 0]
-    if image_name:
+        slots = [n for n in (ref_image_name, image_name) if n]
+        for idx, nm in enumerate(slots):
+            node_id = "14" if idx == 0 else "15"
+            wf[node_id] = {"class_type": "LoadImage", "inputs": {"image": nm}}
+            wf["6"]["inputs"][f"ref_images.ref_image_{idx}"] = [node_id, 0]
+    if image_name and (model_profile or {}).get("family") != "ref2va":
         wf["14"] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
         wf["6"]["inputs"]["first_frame"] = ["14", 0]
     if end_image_name:
@@ -1977,7 +1980,8 @@ def autochain():
          "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"],
          "lora": lora_fn or "", "lora_label": lora_label or "",
          "ref_name": _upload_ref_image(data["ref_image_base64"]) if (data.get("ref_image_base64") and prof.get("family") == "ref2va") else None,
-         "ref_size": data.get("ref_image_size") if data.get("ref_image_size") in ("match", "max") else "match"}
+         "ref_size": data.get("ref_image_size") if data.get("ref_image_size") in ("match", "max") else "match",
+         "model_family": prof.get("family")}
     job_id = f"chain_{int(time.time()*1000):x}"
     AUTO_JOBS[job_id] = {"total": total, "status": "starting", "params": {k: v for k, v in p.items()}}
     threading.Thread(target=run_auto_job, args=(job_id, p), daemon=True).start()
