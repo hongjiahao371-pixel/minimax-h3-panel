@@ -1,0 +1,27 @@
+# 自托管 Docker 部署（非 UPK，适合已 SSH 化的机器，GPU 无任何限制）
+services:
+  h3panel:
+    image: jvsheng/minimax-h3-panel:upk-v1-20260919
+    container_name: h3panel
+    restart: unless-stopped
+    ports:
+      - "8189:8189"
+    environment:
+      TZ: Asia/Shanghai
+      PANEL_CONFIG: /data/config.json
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+    volumes:
+      - /volume2/models:/models
+      - /volume2/h3-output:/output
+      - ./data:/data
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+    volumes_from: []
+    # nvidia-container-runtime 用户可改用：
+    # runtime: nvidia
+    # 驱动库挂载（无 nvidia runtime 时的经典直通方案，二选一）
+      - /usr/lib/x86_64-linux-gnu:/hostlibs:ro

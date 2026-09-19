@@ -7,3 +7,8 @@ postproc/ckpts/
 postproc/tmp/
 docs/screenshots/*.png.tmp
 .DS_Store
+
+# UPK 构建产物（不入库）
+upk-h3/rootfs_amd64/images/*.tar
+upk-h3/rootfs_arm64/images/*.tar
+upk-h3/build_dir/

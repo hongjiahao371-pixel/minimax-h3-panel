@@ -1,0 +1,69 @@
+#!/bin/bash
+# MiniMax-H3 面板容器入口：环境探测 → 目录接线 → 配置生成 → 双服务启动
+set -e
+
+# ---------- 1. 主机 NVIDIA 驱动库发现（devices: 直通的经典配套） ----------
+# /hostlibs 只读挂载宿主机 /usr/lib/x86_64-linux-gnu，找到 libnvidia-ml 即定位驱动库目录
+if [ -d /hostlibs ]; then
+  LIBDIR=$(find /hostlibs -maxdepth 2 -name "libnvidia-ml.so*" 2>/dev/null | head -1 | xargs -r dirname)
+  if [ -n "$LIBDIR" ]; then
+    export LD_LIBRARY_PATH="$LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export NVIDIA_DRIVER_ROOT="$LIBDIR"
+    echo "[entrypoint] host NVIDIA driver libs: $LIBDIR"
+  else
+    echo "[entrypoint] WARN: /hostlibs 挂载了但没找到 NVIDIA 驱动库——容器将以 CPU 降级模式运行"
+  fi
+fi
+
+# ---------- 2. 持久卷接线（符号链接到 ComfyUI 标准目录） ----------
+for d in diffusion_models text_encoders vae loras unet; do
+  mkdir -p "/models/$d"
+  ln -sfn "/models/$d" "/app/ComfyUI/models/$d"
+done
+mkdir -p /output /data/comfyui-input /data/comfyui-user /data/home
+ln -sfn /output /app/ComfyUI/output
+ln -sfn /data/comfyui-input /app/ComfyUI/input
+ln -sfn /data/comfyui-user /app/ComfyUI/user
+
+# ---------- 3. 面板配置（缺失时生成，已有则保留用户改动） ----------
+if [ ! -f /data/config.json ]; then
+  cat > /data/config.json <<'EOF'
+{
+  "comfy_url": "http://127.0.0.1:8188",
+  "port": 8189,
+  "output_dir": "/output",
+  "data_dir": "/data",
+  "postproc_dir": "/app/postproc",
+  "ffmpeg": "/usr/bin/ffmpeg",
+  "ffprobe": "/usr/bin/ffprobe",
+  "python": "/app/venv/bin/python3",
+  "postproc_home": "",
+  "comfy_models_dir": "/models/diffusion_models",
+  "default_model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+  "vram_budget_tokens": 115000000,
+  "vram_warn_tokens": 95000000,
+  "access_password": ""
+}
+EOF
+  echo "[entrypoint] 已生成默认配置 /data/config.json"
+fi
+
+# ---------- 4. ComfyUI 后台启动 ----------
+cd /app/ComfyUI
+/app/venv/bin/python main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch \
+  > /data/comfyui.log 2>&1 &
+echo "[entrypoint] ComfyUI 启动中（日志 /data/comfyui.log）..."
+/app/venv/bin/python - <<'PY'
+import time, urllib.request
+for _ in range(150):
+    try:
+        urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=2)
+        print("[entrypoint] ComfyUI 就绪")
+        break
+    except Exception:
+        time.sleep(2)
+PY
+
+# ---------- 5. 面板前台 ----------
+cd /app/panel
+exec /app/venv/bin/python panel.py

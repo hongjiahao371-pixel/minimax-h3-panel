@@ -1,0 +1,23 @@
+# UPK 安装时的 compose（商店规范：无 host/privileged；GPU 走实验性 devices 声明）
+services:
+  h3panel:
+    image: jvsheng/minimax-h3-panel:upk-v1-20260919
+    restart: unless-stopped
+    ports:
+      - "8189:8189"
+    environment:
+      TZ: Asia/Shanghai
+      PANEL_CONFIG: /data/config.json
+    volumes:
+      - ${MODEL_DIR}:/models
+      - ${OUTPUT_DIR}:/output
+      - ./data:/data
+      # 宿主机 NVIDIA 驱动库只读挂载（entrypoint 自动发现并注入 LD_LIBRARY_PATH）
+      - /usr/lib/x86_64-linux-gnu:/hostlibs:ro
+    # 实验性 GPU 声明：UGOS 官方未文档化，安装链路是否保留待真机验证；
+    # 若被剥除，容器自动降级为 CPU 模式（面板可用，生成不可用）
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools

@@ -1,0 +1,62 @@
+spec_version: 2.1
+app_id: com.jvsheng.h3panel
+version: 1.0.0
+support_arch:
+  - amd64
+is_docker_app: true
+tag_types:
+  - media
+  - backup
+depend_fw_version: 1.0.0
+depend_docker_version: 20.10.0
+allow_add_access_path: true
+open_type: tab
+port: 8189
+privacy_policy_link:
+  - https://github.com/hongjiahao371-pixel/minimax-h3-panel/blob/main/LICENSE
+license_agreement_link:
+  - https://github.com/hongjiahao371-pixel/minimax-h3-panel/blob/main/LICENSE
+source_code_link:
+  - https://github.com/hongjiahao371-pixel/minimax-h3-panel
+technical_support_link:
+  - https://github.com/hongjiahao371-pixel/minimax-h3-panel/issues
+parameters:
+  - key: MODEL_DIR
+    type: path
+    required: true
+    changeable: true
+    i18n:
+      zh-CN:
+        name: 模型目录
+        description: 存放 H3 模型权重的目录。应用会自动创建 diffusion_models / loras / text_encoders / vae 子目录，模型可在应用内「模型库」一键下载部署。模型体积较大（主模型 6~20G），请确保该目录所在卷有 200GB 以上可用空间
+      en-US:
+        name: Model folder
+        description: Folder for H3 model weights. The app creates diffusion_models / loras / text_encoders / vae subfolders automatically; models can be downloaded in-app with one click. Models are large (6~20G each) — ensure 200GB+ free space on this volume
+  - key: OUTPUT_DIR
+    type: path
+    required: true
+    changeable: true
+    i18n:
+      zh-CN:
+        name: 成片输出目录
+        description: 生成的视频与插帧/超分/音频处理成片保存到该目录，可在应用内作品库直接浏览与播放
+      en-US:
+        name: Output folder
+        description: Generated videos and post-processed clips are saved here, browsable in the app's gallery
+i18n:
+  zh-CN:
+    name: H3 视频生成工作台
+    description: 基于 MiniMax-H3 视频模型与 ComfyUI 的本地 AI 视频生成工作台。支持文字/图片/首尾帧生视频、AI 漫剧角色一致性生成（参考图锚定）、长片智能接龙、通宵批量挂机、RIFE 插帧与 AI 超分增强、音频清理、模型库一键下载社区量化模型。所有生成与数据均在本地局域网内完成。重要前置条件：需要为 NAS 安装 NVIDIA 显卡（建议 8GB 以上显存）并在系统上完成驱动安装，未检测到 NVIDIA 环境时生成功能不可用
+    author: jvsheng
+    publisher: jvsheng
+    publisher_link: https://github.com/hongjiahao371-pixel
+    official: https://github.com/hongjiahao371-pixel/minimax-h3-panel
+    help: https://github.com/hongjiahao371-pixel/minimax-h3-panel#readme
+  en-US:
+    name: H3 Video Studio
+    description: A local AI video generation studio built on the MiniMax-H3 model and ComfyUI. Supports text/image/first-last-frame to video, character-consistent AI anime generation via reference images, smart long-film chaining, overnight batch generation, RIFE interpolation, AI super-resolution, audio cleanup, and one-click community model downloads. All generation happens locally. IMPORTANT prerequisite — requires an NVIDIA GPU (8GB+ VRAM recommended) installed on the NAS with drivers in place; generation is unavailable without an NVIDIA environment
+    author: jvsheng
+    publisher: jvsheng
+    publisher_link: https://github.com/hongjiahao371-pixel
+    official: https://github.com/hongjiahao371-pixel/minimax-h3-panel
+    help: https://github.com/hongjiahao371-pixel/minimax-h3-panel#readme
