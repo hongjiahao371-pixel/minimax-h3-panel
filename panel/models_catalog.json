@@ -191,6 +191,39 @@
       ]
     },
     {
+      "id": "ref2va-int8-pruned",
+      "label": "Ref2VA 角色一致性版（INT8 剪枝）",
+      "filename": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "kind": "safetensors",
+      "family": "ref2va",
+      "size_gb": 19.53,
+      "quality": "与 INT8 基线同级",
+      "speed": "参考图 +match 档约 +40% 耗时",
+      "official": true,
+      "desc": "官方 Ref2VA 权重：配合「角色图」使用，模型从参考图提取角色身份（脸型/发色/服装）注入每个采样步，实现跨镜头角色一致——AI 漫剧的核心能力。选它后创作台会出现角色图上传位。",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+      ]
+    },
+    {
+      "id": "lora-ref2v-turbo4",
+      "label": "Ref2VA Turbo LoRA · 4 步（官方）",
+      "filename": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "kind": "lora",
+      "family": "ref2va",
+      "size_gb": 1.82,
+      "lora_steps": 4,
+      "quality": "官方 Ref2VA 配套加速",
+      "speed": "4 步出片，约 2 倍速",
+      "official": true,
+      "desc": "官方 Ref2VA 专用蒸馏加速 LoRA（v0.1）。仅限 Ref2VA 模型使用（与 FL2VA 模型的 Turbo LoRA 不通用）；选用后步数锁定 4 步。",
+      "urls": [
+        "https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+      ]
+    },
+    {
       "id": "fasth3-4step",
       "label": "FastH3 4 步加速版（实验性）",
       "filename": "FastH3-comfy-Q4_K_M.gguf",

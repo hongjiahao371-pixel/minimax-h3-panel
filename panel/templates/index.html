@@ -565,6 +565,12 @@ details.adv summary:hover{color:var(--ink2)}
             <span class="hint">视频结束在这张图</span>
             <span class="imgprev" id="prev2" hidden><img id="thumb2" alt="尾帧"><span class="clr" data-s="2">✕</span></span>
           </div>
+          <div class="imgup" id="zone3">
+            <input type="file" id="file3" accept="image/*" style="display:none">
+            <button class="imgbtn" type="button" id="btn3">🧑 角色图</button>
+            <span class="hint">Ref2VA 锁定角色</span>
+            <span class="imgprev" id="prev3" hidden><img id="thumb3" alt="角色图"><span class="clr" data-s="3">✕</span></span>
+          </div>
           <span class="img-cap">支持拖拽 / 粘贴截图</span>
         </div>
         <div class="pb-right">
@@ -800,6 +806,12 @@ details.adv summary:hover{color:var(--ink2)}
           <span style="margin-left:6px">跑完自动拼接成合集（同尺寸无损拼接，额外入库一条长片）</span>
         </div>
       </div>
+      <div class="bimgrow" style="margin-top:10px">
+        <input type="file" id="batchRef" accept="image/*" style="display:none">
+        <button class="mini" id="batchRefBtn" type="button">🧑 角色图（全批共用）</button>
+        <span class="muted" style="font-size:11px" id="batchRefHint">Ref2VA 模型专用：挂一张角色设定图，全部分镜锁定同一角色——漫剧标配</span>
+        <span class="imgprev" id="batchRefPrev" hidden><img id="batchRefThumb" alt="角色图" style="width:58px;height:34px;object-fit:cover"><span class="clr" id="batchRefClr">✕</span></span>
+      </div>
       <div class="brow">
         <button class="go" id="batchGo" type="button">🌙 开始通宵跑</button>
         <button class="ghost" id="splitBtn" type="button">✂️ 长文拆分成多条</button>
@@ -911,7 +923,7 @@ details.adv summary:hover{color:var(--ink2)}
 window.addEventListener('error',e=>{const el=document.getElementById('stats');if(el)el.innerHTML='<span class="muted">JS错误: '+e.message+' @line'+e.lineno+'</span>';});
 const $=s=>document.querySelector(s);
 const RES={"16:9":[[864,480],[1152,640],[1344,768]],"9:16":[[480,864],[640,1152],[768,1344]],"1:1":[[480,480],[640,640],[768,768]]};
-let aspect="16:9", quality=0, chain=[], pendingCont=false, img1=null, img2=null, lastSubmit=null;
+let aspect="16:9", quality=0, chain=[], pendingCont=false, img1=null, img2=null, img3=null, lastSubmit=null;
 const TOKEN_BUDGET=115000000, TOKEN_WARN=95000000;
 
 // ---------- 提示词模板 ----------
@@ -1172,18 +1184,22 @@ function updGoLabel(){
 }
 function setSlot(n,dataUrl){
   if(n===1){img1=dataUrl;$('#thumb1').src=dataUrl;$('#prev1').hidden=false;}
-  else{img2=dataUrl;$('#thumb2').src=dataUrl;$('#prev2').hidden=false;}
+  else if(n===2){img2=dataUrl;$('#thumb2').src=dataUrl;$('#prev2').hidden=false;}
+  else{img3=dataUrl;$('#thumb3').src=dataUrl;$('#prev3').hidden=false;updModelNote();}
   updEta(); updGoLabel();
 }
 function readAsDataURL(file,slot){const rd=new FileReader();rd.onload=()=>setSlot(slot,rd.result);rd.readAsDataURL(file);}
 $('#btn1').addEventListener('click',()=>$('#file1').click());
 $('#btn2').addEventListener('click',()=>$('#file2').click());
+$('#btn3').addEventListener('click',()=>$('#file3').click());
 $('#file1').addEventListener('change',e=>{if(e.target.files[0])readAsDataURL(e.target.files[0],1);});
 $('#file2').addEventListener('change',e=>{if(e.target.files[0])readAsDataURL(e.target.files[0],2);});
+$('#file3').addEventListener('change',e=>{if(e.target.files[0])readAsDataURL(e.target.files[0],3);});
 document.querySelectorAll('.clr').forEach(x=>x.addEventListener('click',()=>{
   const n=+x.dataset.s;
   if(n===1){img1=null;$('#prev1').hidden=true;$('#file1').value='';}
-  else{img2=null;$('#prev2').hidden=true;$('#file2').value='';}
+  else if(n===2){img2=null;$('#prev2').hidden=true;$('#file2').value='';}
+  else{img3=null;$('#prev3').hidden=true;$('#file3').value='';updModelNote();}
   updEta(); updGoLabel();
 }));
 function bindZone(id,slot){
@@ -1195,7 +1211,7 @@ function bindZone(id,slot){
     if(f)readAsDataURL(f,slot);
   });
 }
-bindZone('#zone1',1); bindZone('#zone2',2);
+bindZone('#zone1',1); bindZone('#zone2',2); bindZone('#zone3',3);
 document.addEventListener('paste',e=>{
   const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/')); if(!it)return;
   readAsDataURL(it.getAsFile(), img1?2:1);
@@ -1294,6 +1310,7 @@ $('#go').addEventListener('click',()=>{
       count:+$('#count').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,crop:$('#crop').value,force:forceFlag,
       model:$('#model').value||undefined,lora:$('#lora').value||undefined,
+      ref_image_base64:img3||undefined,ref_image_size:'match',
       steps_list:(($('#stepscan')&&$('#stepscan').value||'').split(',').filter(Boolean).map(Number)),
       image_base64:img1||undefined,end_image_base64:img2||undefined})})
   .then(r=>r.json()).then(d=>{
@@ -1385,11 +1402,13 @@ function submitAutoChain(prompt,w,h){
       steps:+$('#steps').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,
       model:$('#model').value||undefined,lora:$('#lora').value||undefined,
+      ref_image_base64:img3||undefined,ref_image_size:'match',
       force:w*h*len>TOKEN_BUDGET}
     :{prompt,width:w,height:h,length:len,segments:segs,
       steps:+$('#steps').value,seed:+$('#seed').value,turbo:$('#turbo').checked,
       sampler:$('#sampler').value,scheduler:$('#scheduler').value,
       model:$('#model').value||undefined,lora:$('#lora').value||undefined,
+      ref_image_base64:img3||undefined,ref_image_size:'match',
       force:w*h*len>TOKEN_BUDGET};
   fetch('/api/autochain',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(payload)})
@@ -1991,10 +2010,13 @@ function updModelNote(){
   const m=window.H3MODELS, note=$('#modelNote'); if(!m||!note)return;
   const e=(m.installed||[]).find(x=>x.filename===$('#model').value);
   if(!e){note.textContent='社区衍生模型可在「模型库」一键下载部署';return;}
+  const isRef=e.filename.toLowerCase().includes('ref2va');
   const bits=[e.desc];
   if(e.rec_note)bits.push(e.rec_note);
   if(e.steps_fixed)bits.push('加速版：步数锁定 '+e.steps_fixed+'，加速开关自动忽略');
   else if(e.turbo_compat===false)bits.push('该模型与加速开关互斥（提交时自动忽略加速）');
+  if(isRef)bits.push(img3?'✓ 已挂角色图，生成将锚定该角色':'⚠ Ref2VA 模型：请点输入台下方「🧑 角色图」上传角色设定图，否则无一致性效果');
+  else if(img3)bits.push('⚠ 已挂角色图但当前是 FL2VA 模型——角色图仅 Ref2VA 模型可用');
   note.textContent=bits.filter(Boolean).join('。');
 }
 function recBadge(rec){
@@ -2166,6 +2188,14 @@ $('#batchThumbs').addEventListener('click',e=>{
   const b=e.target.closest('.bx'); if(!b)return;
   batchImages.splice(+b.dataset.bi,1);renderBatchThumbs();
 });
+let batchRefImg=null;
+$('#batchRefBtn').addEventListener('click',()=>$('#batchRef').click());
+$('#batchRef').addEventListener('change',e=>{
+  const f=(e.target.files||[])[0]; if(!f)return;
+  const rd=new FileReader();rd.onload=()=>{batchRefImg=rd.result;$('#batchRefThumb').src=rd.result;$('#batchRefPrev').hidden=false;};rd.readAsDataURL(f);
+  e.target.value='';
+});
+$('#batchRefClr').addEventListener('click',()=>{batchRefImg=null;$('#batchRefPrev').hidden=true;});
 $('#navBatch').addEventListener('click',()=>{
   setActiveNav('navBatch');
   updBatchSummary();
@@ -2261,6 +2291,7 @@ $('#batchGo').addEventListener('click',()=>{
       model:$('#model').value||undefined,lora:$('#lora').value||undefined,
       autopost:$('#autopost').value||'',auto_concat:$('#batchConcat').checked,
       images_base64:batchImages.length?batchImages:undefined,
+      ref_image_base64:batchRefImg||undefined,ref_image_size:'match',
       start_at:start_at||undefined,
       force:w*h*len>TOKEN_BUDGET})})
   .then(r=>r.json()).then(d=>{

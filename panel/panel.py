@@ -136,13 +136,16 @@ def _meta_from_history(item):
         n1 = graph.get("1", {}).get("inputs", {})
         unet_fn = n1.get("unet_name") or UNET
         lora_fn = graph.get("16", {}).get("inputs", {}).get("lora_name") or ""
+        has_ref = any(k.startswith("ref_images.") for k in n6)
+        ref_size = n6.get("ref_image_size", "match") if has_ref else ""
         meta.update({"prompt": n6.get("prompt"), "width": n6.get("width"),
                      "height": n6.get("height"), "length": n6.get("length"),
                      "seed": n8.get("seed"), "steps": n8.get("steps"),
                      "sampler": n8.get("sampler_name"), "scheduler": n8.get("scheduler"),
-                     "turbo": "5" in graph, "i2v": "14" in graph, "end_frame": "15" in graph,
+                     "turbo": "5" in graph, "i2v": "14" in graph and not has_ref, "end_frame": "15" in graph,
                      "model": unet_fn, "model_label": (CATALOG.get(unet_fn) or {}).get("label") or unet_fn,
-                     "lora": lora_fn, "lora_label": (CATALOG.get(lora_fn) or {}).get("label") or lora_fn})
+                     "lora": lora_fn, "lora_label": (CATALOG.get(lora_fn) or {}).get("label") or lora_fn,
+                     "has_ref": has_ref, "ref_size": ref_size})
     except Exception:
         pass
     return meta
@@ -230,7 +233,8 @@ def _unet_loader_node(model_profile):
 
 
 def build_workflow(prompt, width, height, length, seed, steps, image_name=None, end_image_name=None,
-                   turbo=False, sampler="euler", scheduler="normal", model_profile=None, lora=None):
+                   turbo=False, sampler="euler", scheduler="normal", model_profile=None, lora=None,
+                   ref_image_name=None, ref_image_size="match"):
     w = width // 32 * 32
     h = height // 32 * 32
     wf = {
@@ -258,6 +262,15 @@ def build_workflow(prompt, width, height, length, seed, steps, image_name=None, 
             "resuse_threshold": 0.04, "start_percent": 0.15, "end_percent": 0.9,
             "max_steps": 2, "device": "auto", "verbose": False}}
         wf["7"]["inputs"]["model"] = ["5", 0]
+    if (model_profile or {}).get("family") == "ref2va":
+        # Ref2VA：节点 6 换成参考图条件生成（输出同为 positive+latent，下游接线不变）
+        wf["6"] = {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+            "clip": ["2", 0], "vae": ["3", 0], "audio_vae": ["4", 0],
+            "prompt": prompt, "width": w, "height": h, "length": length,
+            "ref_image_size": ref_image_size if ref_image_size in ("match", "max") else "match"}}
+        if ref_image_name:
+            wf["14"] = {"class_type": "LoadImage", "inputs": {"image": ref_image_name}}
+            wf["6"]["inputs"]["ref_images.ref_image_0"] = ["14", 0]
     if image_name:
         wf["14"] = {"class_type": "LoadImage", "inputs": {"image": image_name}}
         wf["6"]["inputs"]["first_frame"] = ["14", 0]
@@ -378,9 +391,20 @@ def generate():
     if prof.get("steps_fixed") and data.get("lora"):
         return jsonify({"ok": False, "error": "加速版权重不能叠加 Turbo LoRA（自身已折叠加速），请二选一"})
     try:
-        lora_fn, lora_steps, lora_label = _resolve_lora(data.get("lora"))
+        lora_fn, lora_steps, lora_label = _resolve_lora(data.get("lora"), prof.get("family"))
     except LookupError as e:
         return jsonify({"ok": False, "error": str(e)})
+    # 角色参考图（Ref2VA 专属）：与首/尾帧互斥（先校验后上传，离线也能立即报参数错误）
+    if data.get("ref_image_base64") and prof.get("family") != "ref2va":
+        return jsonify({"ok": False, "error": "角色参考图需要 Ref2VA 模型——请到模型库下载「Ref2VA 角色一致性版」后在高级选项切换"})
+    if prof.get("family") == "ref2va" and data.get("ref_image_base64") and (data.get("image_base64") or data.get("end_image_base64")):
+        return jsonify({"ok": False, "error": "Ref2VA 模型不支持首/尾帧图生视频（那是 FL2VA 模型的能力）；角色图与首/尾帧请二选一"})
+    ref_image_name = None
+    if data.get("ref_image_base64"):
+        try:
+            ref_image_name = _upload_ref_image(data["ref_image_base64"])
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"角色图上传失败: {e}"})
 
     def upload_b64_image(b64):
         img = Image.open(io.BytesIO(base64.b64decode(b64.split(",")[-1]))).convert("RGB")
@@ -429,12 +453,14 @@ def generate():
     elif prof.get("steps_fixed"):
         steps_list = [int(prof["steps_fixed"])]  # 加速版权重折叠了 LoRA，步数锁定
     turbo_eff = turbo and prof.get("turbo_compat", True) and not lora_fn  # LoRA 与 TeaCache 互斥
+    ref_size = data.get("ref_image_size") if data.get("ref_image_size") in ("match", "max") else "match"
     with LOCK:
         for stp in steps_list:
             for i in range(count):
                 actual_seed = (seed + i) if seed else random.randint(1, 2**31 - 1)
                 wf = build_workflow(prompt, use_w, use_h, length, actual_seed, stp,
-                                    image_name, end_image_name, turbo_eff, sampler, scheduler, prof, lora_fn)
+                                    image_name, end_image_name, turbo_eff, sampler, scheduler, prof, lora_fn,
+                                    ref_image_name, ref_size)
                 try:
                     r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
                     res = r.json()
@@ -450,6 +476,7 @@ def generate():
                               "sampler": sampler, "scheduler": scheduler, "crop": crop,
                               "model": prof["filename"], "model_label": prof["label"],
                               "lora": lora_fn or "", "lora_label": lora_label or "",
+                              "has_ref": bool(ref_image_name), "ref_size": ref_size if ref_image_name else "",
                               "t0": time.time(), "time": int(time.time())}
                 tasks.append({"task_id": tid, "seed": actual_seed, "steps": stp})
                 threading.Thread(target=_watch_task, args=(tid,), daemon=True).start()
@@ -748,27 +775,46 @@ def _installed_loras():
         return []
 
 
-def _resolve_lora(name):
-    """加速 LoRA 选择 → (文件名, 锁定步数, 展示名)；未选返回 (None, None, None)"""
+def _model_profile(name):
+    """生成请求里的模型名 → 工作流档案；空/未知回落默认模型"""
+    fn = os.path.basename(str(name or "")) or DEFAULT_MODEL
+    e = CATALOG.get(fn) or {}
+    kind = e.get("kind") or ("gguf" if fn.lower().endswith(".gguf") else "safetensors")
+    family = e.get("family") or ("ref2va" if "ref2va" in fn.lower() else "fl2va")
+    return {"filename": fn, "label": e.get("label") or fn, "kind": kind, "family": family,
+            "steps_fixed": e.get("steps_fixed"), "turbo_compat": e.get("turbo_compat", True),
+            "needs_gguf": kind == "gguf"}
+
+
+def _resolve_lora(name, family=None):
+    """加速 LoRA 选择 → (文件名, 锁定步数, 展示名)；未选返回 (None, None, None)。
+    Ref2VA 模型只能配 Ref2VA 家族的 LoRA，反之亦然。"""
     fn = os.path.basename(str(name or ""))
     if not fn:
         return None, None, None
     e = CATALOG.get(fn) or {}
     if e.get("kind") != "lora":
         return None, None, None
+    lora_family = e.get("family") or "fl2va"
+    if family and lora_family != family:
+        raise LookupError(f"该 LoRA 属于 {lora_family.upper()} 家族，与当前模型（{family.upper()}）不通用；请换用同家族的加速 LoRA")
     if fn not in _installed_loras():
         raise LookupError(f"加速 LoRA 未安装：{e.get('label') or fn}（到模型库一键下载）")
     return fn, int(e.get("lora_steps") or 8), (e.get("label") or fn)
 
 
-def _model_profile(name):
-    """生成请求里的模型名 → 工作流档案；空/未知回落默认模型"""
-    fn = os.path.basename(str(name or "")) or DEFAULT_MODEL
-    e = CATALOG.get(fn) or {}
-    kind = e.get("kind") or ("gguf" if fn.lower().endswith(".gguf") else "safetensors")
-    return {"filename": fn, "label": e.get("label") or fn, "kind": kind,
-            "steps_fixed": e.get("steps_fixed"), "turbo_compat": e.get("turbo_compat", True),
-            "needs_gguf": kind == "gguf"}
+def _upload_ref_image(b64):
+    """角色参考图：不裁剪不缩放（保持原图身份信息），仅限 PNG 上传"""
+    img = Image.open(io.BytesIO(base64.b64decode(b64.split(",")[-1]))).convert("RGB")
+    if max(img.size) > 2048:
+        img.thumbnail((2048, 2048), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    r = requests.post(f"{COMFY}/upload/image",
+                      files={"image": ("panel_ref.png", buf.getvalue(), "image/png")}, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}")
+    return r.json()["name"]
 
 
 def _hardware():
@@ -1262,6 +1308,7 @@ def videos():
                     "gen_seconds": m.get("gen_seconds"), "end_frame": m.get("end_frame"),
                     "model": m.get("model"), "model_label": m.get("model_label"),
                     "lora": m.get("lora"), "lora_label": m.get("lora_label"),
+                    "has_ref": m.get("has_ref"), "ref_size": m.get("ref_size"),
                     "batch": m.get("batch"),
                     "postproc": m.get("postproc"), "src": m.get("src"),
                     "merged": m.get("merged"), "segments": m.get("segments"), "star": m.get("star")})
@@ -1729,7 +1776,8 @@ def run_auto_job(job_id, p):
             actual_seed = (p["seed"] + i) if p["seed"] else random.randint(1, 2 ** 31 - 1)
             wf = build_workflow(seg_prompt, p["width"], p["height"], p["length"], actual_seed,
                                 p["steps"], prev_image, None, p["turbo"], p["sampler"], p["scheduler"],
-                                {"filename": p["model"], "kind": p["model_kind"]}, p.get("lora") or None)
+                                {"filename": p["model"], "kind": p["model_kind"], "family": p.get("model_family", "fl2va")},
+                                p.get("lora") or None, p.get("ref_name"), p.get("ref_size") or "match")
             try:
                 r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10).json()
             except Exception:
@@ -1858,7 +1906,9 @@ def autochain():
          "turbo": bool(data.get("turbo", True)) and prof.get("turbo_compat", True) and not lora_fn,
          "sampler": data.get("sampler") or "euler", "scheduler": data.get("scheduler") or "normal",
          "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"],
-         "lora": lora_fn or "", "lora_label": lora_label or ""}
+         "lora": lora_fn or "", "lora_label": lora_label or "",
+         "ref_name": _upload_ref_image(data["ref_image_base64"]) if (data.get("ref_image_base64") and prof.get("family") == "ref2va") else None,
+         "ref_size": data.get("ref_image_size") if data.get("ref_image_size") in ("match", "max") else "match"}
     job_id = f"chain_{int(time.time()*1000):x}"
     AUTO_JOBS[job_id] = {"total": total, "status": "starting", "params": {k: v for k, v in p.items()}}
     threading.Thread(target=run_auto_job, args=(job_id, p), daemon=True).start()
@@ -1976,10 +2026,11 @@ def _upload_batch_image(b64, w, h, crop="center"):
     return r.json()["name"]
 
 
-def _batch_submit_one(prompt, seed, p, image_name=None):
+def _batch_submit_one(prompt, seed, p, image_name=None, ref_image_name=None):
     wf = build_workflow(prompt, p["width"], p["height"], p["length"], seed, p["steps"],
                         image_name, None, p["turbo"], p["sampler"], p["scheduler"],
-                        {"filename": p["model"], "kind": p["model_kind"]}, p.get("lora") or None)
+                        {"filename": p["model"], "kind": p["model_kind"], "family": p.get("model_family")},
+                        p.get("lora") or None, ref_image_name, p.get("ref_size") or "match")
     r = requests.post(f"{COMFY}/prompt", json={"prompt": wf, "client_id": "h3-panel"}, timeout=10)
     res = r.json()
     if "prompt_id" not in res:
@@ -2090,7 +2141,8 @@ def run_batch_job(job_id):
                 if job.get("cancel"):
                     break
                 try:
-                    tid, w, h = _batch_submit_one(prompt, seed, p, image_name)
+                    tid, w, h = _batch_submit_one(prompt, seed, p, image_name,
+                                                  job.get("ref_name") if not image_name else None)
                     job["conn_retry"] = 0
                     break
                 except requests.RequestException:
@@ -2226,6 +2278,17 @@ def batch_start():
             img_names[i] = _upload_batch_image(b64, width, height)
         except Exception as e:
             img_errs.append(f"第 {i + 1} 张首帧图上传失败，对应行退化为文生视频：{str(e)[:100]}")
+    # 角色参考图（Ref2VA 全批共用一张；与首帧图互斥）
+    ref_name = None
+    if data.get("ref_image_base64"):
+        if prof.get("family") != "ref2va":
+            return jsonify({"ok": False, "error": "角色参考图需要 Ref2VA 模型——请到模型库下载并切换"})
+        if images:
+            return jsonify({"ok": False, "error": "Ref2VA 模型不支持首帧图生视频；角色图与首帧图请二选一（或切回 FL2VA 模型）"})
+        try:
+            ref_name = _upload_ref_image(data["ref_image_base64"])
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"角色图上传失败: {e}"})
     p = {"per_prompt": per,
          "width": width, "height": height, "length": length,
          "steps": lora_steps or (int(prof["steps_fixed"]) if prof.get("steps_fixed")
@@ -2236,7 +2299,9 @@ def batch_start():
          "autopost": data.get("autopost") if data.get("autopost") in ("rife", "x2", "rife_x2") else "",
          "auto_concat": bool(data.get("auto_concat", False)),
          "model": prof["filename"], "model_kind": prof["kind"], "model_label": prof["label"],
-         "lora": lora_fn or "", "lora_label": lora_label or ""}
+         "model_family": prof.get("family"),
+         "lora": lora_fn or "", "lora_label": lora_label or "",
+         "ref_size": data.get("ref_image_size") if data.get("ref_image_size") in ("match", "max") else "match"}
     queue = [[prompt, random.randint(1, 2 ** 31 - 1), (i if i < len(images) else None)]
              for i, prompt in enumerate(prompts) for _ in range(per)]
     per_sec = _estimate_seconds_per(p) + (PP_EST.get("concat", 0) if p["auto_concat"] else 0)
@@ -2247,7 +2312,7 @@ def batch_start():
            "prompts_total": len(prompts), "total": total,
            "done": 0, "failed": 0, "videos": [], "failures": [],
            "queue": queue, "current": None, "current_tid": None,
-           "img_names": img_names, "merged": None,
+           "img_names": img_names, "merged": None, "ref_name": ref_name,
            "params": p, "eta_seconds_per": per_sec,
            "eta_end": int((start_at or time.time()) + total * per_sec),
            "conn_retry": 0, "cancel": False, "error": ""}
