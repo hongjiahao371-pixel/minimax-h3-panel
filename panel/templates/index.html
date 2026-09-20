@@ -82,7 +82,8 @@ h1 em{font-style:normal;background:linear-gradient(120deg,#1d4ed8,#7c3aed);-webk
 .hero-sub i.r{background:linear-gradient(to right,rgba(100,120,165,.45),transparent)}
 
 /* ---------- 创作输入台（主玻璃卡） ---------- */
-.composer{max-width:min(1320px,calc(100% - 48px));margin:0 auto;padding:6px 0 0}
+:root{--mainw:min(1480px,calc(100% - 48px))}
+.composer{max-width:var(--mainw);margin:0 auto;padding:6px 0 0}
 .pbox{background:rgba(255,255,255,.66);
   backdrop-filter:blur(22px) saturate(175%);-webkit-backdrop-filter:blur(22px) saturate(175%);
   border:1px solid rgba(255,255,255,.9);border-radius:20px;padding:16px 16px 13px;position:relative;
@@ -197,7 +198,7 @@ details.adv summary:hover{color:var(--ink2)}
 #segSel{width:auto;min-width:96px;padding:6px 30px 6px 12px;font-size:12px}
 
 /* ---------- 进度 / 结果 ---------- */
-.stage{max-width:min(1320px,calc(100% - 48px));margin:0 auto;padding:0}
+.stage{max-width:var(--mainw);margin:0 auto;padding:0}
 .progress{display:none;margin-top:14px;padding:15px 16px;border-radius:17px;position:relative;
   background:rgba(255,255,255,.55);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
   border:1px solid rgba(59,130,246,.25);font-size:13px;line-height:1.6;color:var(--ink);
@@ -216,7 +217,7 @@ details.adv summary:hover{color:var(--ink2)}
 .eta{color:#5d6884;font-size:12px;margin-top:10px;text-align:center}
 
 /* ---------- 作品库（玻璃卡片墙，宽屏自适应） ---------- */
-.library{max-width:min(1480px,calc(100% - 48px));margin:38px auto 0;padding:0}
+.library{max-width:var(--mainw);margin:38px auto 0;padding:0}
 .lib-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .lib-title{font-size:16px;font-weight:800;letter-spacing:-.01em;color:#202634}
 .filterbar{display:flex;gap:7px;margin-bottom:4px}
@@ -316,8 +317,7 @@ details.adv summary:hover{color:var(--ink2)}
   h1 br{display:none}
 }
 @media(min-width:2560px){
-  .composer,.stage{max-width:min(2000px,calc(100% - 64px))}
-  .library{max-width:min(2200px,calc(100% - 64px))}
+  :root{--mainw:min(2200px,calc(100% - 64px))}
   .composer .pbox textarea{min-height:180px}
 }
 
@@ -2522,9 +2522,9 @@ $('#obDownload').addEventListener('click',function(){
 });
 (function(){
   if(!localStorage.getItem('h3onboard')){
-    Promise.all([fetch('/api/models').then(r=>r.json())]).then(([m])=>{
-      if(m.ok&&(m.installed||[]).length===0){$('#onboardOv').hidden=false;obGo(1);}
-    });
+    fetch('/api/models').then(r=>r.json()).then(m=>{
+      if(m.ok){$('#onboardOv').hidden=false;obGo(1);}
+    }).catch(function(){});
   }
 })();
 
