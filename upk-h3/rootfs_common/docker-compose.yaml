@@ -1,7 +1,7 @@
 # UPK 安装时的 compose（商店规范：无 host/privileged；GPU 走实验性 devices 声明）
 services:
   h3panel:
-    image: jvsheng/minimax-h3-panel:upk-v1-20260919
+    image: jvsheng/minimax-h3-panel:upk-v3-20260920
     restart: unless-stopped
     ports:
       - "8189:8189"
