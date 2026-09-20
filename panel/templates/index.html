@@ -506,8 +506,33 @@ details.adv summary:hover{color:var(--ink2)}
 .ob-hint{font-size:13px;line-height:1.7;color:var(--ink2);background:rgba(82,146,134,.08);
   border-left:3px solid #529286;padding:10px 14px;border-radius:0 10px 10px 0;margin:10px 0}
 .ob-gpu{font-size:14px;color:var(--ink);background:rgba(82,146,134,.08);border-radius:10px;padding:10px 14px;margin:10px 0}
-.ob-progress{height:6px;border-radius:3px;background:rgba(120,140,180,.15);overflow:hidden;margin:10px 0}
-.ob-progress i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#7c3aed);border-radius:3px;transition:width .5s}
+.ob-spec{display:flex;flex-direction:column;gap:10px;margin:18px 0 6px;text-align:left}
+.ob-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:13px;
+  background:rgba(245,248,255,.75);border:1px solid rgba(150,170,210,.22)}
+.ob-row .ob-ico{font-size:19px}
+.ob-row .ob-main{flex:1;display:flex;flex-direction:column;gap:1px;min-width:0}
+.ob-row .ob-main b{font-size:13px;color:var(--ink)}
+.ob-row .ob-main span{font-size:12px;color:var(--ink2);word-break:break-all}
+.ob-badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.ob-badge.ok{color:#0c7a43;background:rgba(34,170,100,.12);border:1px solid rgba(34,170,100,.25)}
+.ob-badge.warn{color:#b45309;background:rgba(240,150,30,.1);border:1px solid rgba(240,150,30,.25)}
+.ob-rec{text-align:left;font-size:14px;line-height:1.7;color:var(--ink);background:rgba(245,248,255,.75);
+  border:1px solid rgba(150,170,210,.22);border-radius:13px;padding:13px 15px;margin:4px 0 10px}
+.ob-rec .ob-note{font-size:12px;color:var(--ink2)}
+.ob-progress{margin:0 0 12px;text-align:left}
+.ob-bar{height:10px;border-radius:999px;background:rgba(120,140,180,.18);overflow:hidden}
+.ob-bar i{display:block;height:100%;width:0;border-radius:999px;background:var(--grad);transition:width .6s}
+.ob-meta{font-size:12px;color:var(--ink2);margin-top:6px}
+.ob-lora{display:flex;align-items:center;gap:10px;text-align:left;padding:11px 14px;border-radius:13px;
+  background:rgba(255,244,224,.6);border:1px solid rgba(240,180,80,.3);margin-bottom:12px}
+.ob-lora .ob-main{flex:1;display:flex;flex-direction:column;gap:1px;min-width:0}
+.ob-lora .ob-main b{font-size:13px;color:var(--ink)}
+.ob-lora .ob-main span{font-size:12px;color:var(--ink2)}
+.ob-feats{display:flex;flex-direction:column;gap:9px;margin:6px 0 14px;text-align:left}
+.ob-feat{display:flex;flex-direction:column;gap:1px;padding:10px 14px;border-radius:12px;
+  background:rgba(245,248,255,.75);border:1px solid rgba(150,170,210,.22)}
+.ob-feat b{font-size:13px;color:var(--ink)}
+.ob-feat span{font-size:12px;color:var(--ink2);line-height:1.55}
 .onboard-tip{font-size:11px;color:#b45309;background:rgba(240,150,30,.07);border:1px solid rgba(240,150,30,.15);
   border-radius:8px;padding:5px 10px;margin-top:4px;line-height:1.5}
 .bthumbs .bth{position:relative;width:58px;height:34px;border-radius:7px;overflow:hidden;border:1px solid rgba(120,140,180,.3)}
@@ -897,26 +922,45 @@ details.adv summary:hover{color:var(--ink2)}
     <div class="ob-card">
       <div class="ob-step active" data-step="1">
         <h2>👋 欢迎使用 H3 视频工作台</h2>
-        <p>基于 MiniMax-H3 模型的本地 AI 视频生成工具。三分钟完成初始设置。</p>
-        <div class="ob-gpu" id="obGpuInfo">正在检测 GPU…</div>
-        <div class="ob-actions"><button class="ob-btn" onclick="obGo(2)">开始设置 →</button></div>
+        <p>本地 AI 视频生成：文生视频、图生视频、智能长片接龙，出片自带音效。先看看这台机器的准备情况：</p>
+        <div class="ob-spec">
+          <div class="ob-row"><span class="ob-ico">🖥️</span><div class="ob-main"><b>显卡</b><span id="obGpu">检测中…</span></div><span class="ob-badge" id="obGpuBadge"></span></div>
+          <div class="ob-row"><span class="ob-ico">⚙️</span><div class="ob-main"><b>生成引擎（ComfyUI）</b><span id="obEngine">检测中…</span></div><span class="ob-badge" id="obEngineBadge"></span></div>
+          <div class="ob-row"><span class="ob-ico">📦</span><div class="ob-main"><b>生成模型</b><span id="obModels">检测中…</span></div><span class="ob-badge" id="obModelsBadge"></span></div>
+        </div>
+        <div class="ob-actions">
+          <button class="ob-btn ghost" id="obRecheck">↻ 重新检测</button>
+          <button class="ob-btn" onclick="obGo(2)">下一步 →</button>
+        </div>
       </div>
       <div class="ob-step" data-step="2">
-        <h2>📦 下载模型</h2>
-        <p id="obModelRec">检测适合你显卡的模型…</p>
-        <div id="obModelStatus" class="ob-hint" hidden></div>
+        <h2>📦 模型下载</h2>
+        <div class="ob-rec" id="obRec">正在按你的显存挑选模型…</div>
+        <div class="ob-progress" id="obProg" hidden>
+          <div class="ob-bar"><i id="obBar"></i></div>
+          <div class="ob-meta" id="obMeta"></div>
+        </div>
+        <div class="ob-lora" id="obLora" hidden>
+          <div class="ob-main"><b>⚡ Turbo LoRA 加速（1.8G）</b><span>装上后选 4 步出片，速度约 2 倍，画质基本无损</span></div>
+          <button class="ob-btn ghost" id="obLoraBtn">⬇ 下载</button>
+        </div>
         <div class="ob-actions">
-          <button class="ob-btn ghost" onclick="obGo(3)">稍后下载</button>
+          <button class="ob-btn ghost" onclick="obGo(3)">稍后再说</button>
           <button class="ob-btn" id="obDownload">⬇ 一键下载推荐模型</button>
         </div>
       </div>
       <div class="ob-step" data-step="3">
-        <h2>✅ 设置完成</h2>
-        <div class="ob-hint">💡 创作台 → 高级参数 → 加速 LoRA 选 Turbo 4 步，出片速度翻倍</div>
-        <div class="ob-hint">🌙 通宵批量：贴多行分镜提示词，挂机自动跑完并拼合集</div>
-        <div class="ob-hint">🧑 角色图：上传角色设定图，跨镜头锁定角色</div>
-        <p style="margin-top:14px">探索左侧菜单发现更多功能。</p>
-        <div class="ob-actions"><button class="ob-btn" onclick="obFinish()">完成，开始创作 →</button></div>
+        <h2>🚀 30 秒上手</h2>
+        <div class="ob-feats">
+          <div class="ob-feat"><b>✍️ 写提示词</b><span>正向描述画面、镜头和声音；写「8秒 / 竖屏 / 超清」会自动套用参数</span></div>
+          <div class="ob-feat"><b>⚡ 提速出片</b><span>高级参数 → 加速 LoRA 选 Turbo 4 步；「音频清理」可去掉底噪</span></div>
+          <div class="ob-feat"><b>🌙 通宵批量</b><span>每行一条分镜贴进去，挂机自动跑完并拼成合集</span></div>
+          <div class="ob-feat"><b>🧑 角色不崩脸</b><span>上传角色设定图（Ref2VA 模型），跨镜头锁定长相和服装</span></div>
+        </div>
+        <div class="ob-actions">
+          <button class="ob-btn ghost" id="obTry">✨ 填入示例提示词试试</button>
+          <button class="ob-btn" onclick="obFinish()">完成，开始创作 →</button>
+        </div>
       </div>
       <div class="ob-dots"><i class="on"></i><i></i><i></i></div>
     </div>
@@ -2484,48 +2528,106 @@ $('#storClean').addEventListener('click',()=>{
 });
 
 // ---------- 新手引导 ----------
-let obStep=1;
+let obStep=1, obData=null, obTimer=null;
+const OB_LORA='minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors';
+function obBadge(id,ok,txt){const e=$(id);e.textContent=txt||'';e.className='ob-badge '+(ok?'ok':'warn');}
+function obRenderSpec(){
+  const m=obData||{},hw=m.hardware||{},inst=m.installed||[];
+  if(hw.gpu){$('#obGpu').textContent=hw.gpu.replace(/^cuda:0\s*/,'')+' · 显存 '+hw.vram_gb+'G / 内存 '+(hw.ram_gb||'?')+'G';obBadge('#obGpuBadge',true,'正常');}
+  else{$('#obGpu').textContent='未检测到 NVIDIA 显卡，生成将不可用';obBadge('#obGpuBadge',false,'未识别');}
+  if(hw.online){$('#obEngine').textContent='ComfyUI 运行中，可以开始生成';obBadge('#obEngineBadge',true,'正常');}
+  else{$('#obEngine').textContent='ComfyUI 未响应：首次启动需 1-2 分钟，可点「重新检测」';obBadge('#obEngineBadge',false,'离线');}
+  if(inst.length){$('#obModels').textContent='已安装 '+inst.length+' 个：'+inst.slice(0,2).map(x=>x.label).join('、')+(inst.length>2?' 等':'');obBadge('#obModelsBadge',true,'就绪');}
+  else{$('#obModels').textContent='还没有模型，下一步按显存帮你挑一个';obBadge('#obModelsBadge',false,'待下载');}
+}
+function obRecFor(vr){
+  if(vr>=12)return{fn:'minimax_h3_fl2va_pruned_int8_convrot.safetensors',label:'INT8 基线',note:'19.5G · 官方画质基准，流式加载，出片最稳'};
+  if(vr>=8)return{fn:'minimax_h3_fl2va_pruned-Q4_K.gguf',label:'GGUF Q4_K',note:'10.6G · 画质与显存的平衡之选'};
+  return{fn:'minimax_h3_fl2va_pruned-Q2_K.gguf',label:'GGUF Q2_K',note:'6.3G · 只够验证流程，画质损失明显；出正式片建议 12G 以上显存',warn:true};
+}
+function obUpdateBar(d){
+  const prog=$('#obProg'),bar=$('#obBar'),meta=$('#obMeta');
+  if(d.status==='downloading'&&d.total){
+    prog.hidden=false;
+    const pct=Math.min(100,Math.round(d.downloaded/d.total*100));
+    bar.style.width=pct+'%';
+    meta.textContent=pct+'% · '+(d.downloaded/1073741824).toFixed(2)+' / '+(d.total/1073741824).toFixed(2)+' GB'
+      +(d.speed?' · '+(d.speed/1048576).toFixed(1)+' MB/s':'')+(d.eta_s?' · 剩约 '+Math.max(1,Math.round(d.eta_s/60))+' 分钟':'');
+  }else if(d.status==='error'){prog.hidden=false;bar.style.width='0%';meta.textContent='下载失败：'+(d.error||'未知错误')+'，可重试';}
+  else prog.hidden=true;
+}
+function obPollStart(){
+  clearTimeout(obTimer);
+  const tick=function(){
+    fetch('/api/models').then(r=>r.json()).then(function(m){
+      if(!m||!m.ok)return;
+      const d=m.download||{};
+      obUpdateBar(d);
+      if(d.status==='downloading'){obTimer=setTimeout(tick,2000);}
+      else{obData=m;if(obStep===2)obRenderRec();}
+    }).catch(function(){obTimer=setTimeout(tick,3000);});
+  };
+  tick();
+}
+function obRenderRec(){
+  const m=obData;if(!m)return;
+  const vr=(m.hardware||{}).vram_gb;
+  const rec=obRecFor(vr||0);
+  const e=(m.installed||[]).find(x=>x.filename===rec.fn);
+  const loraE=(m.installed||[]).find(x=>x.filename===OB_LORA);
+  const main=$('#obRec'),dl=$('#obDownload'),loraRow=$('#obLora'),loraBtn=$('#obLoraBtn');
+  if(e){
+    main.innerHTML='✅ 推荐的 <b>'+esc(rec.label)+'</b> 已安装，可以直接开始创作。';
+    dl.hidden=true;
+    if(!loraE){loraRow.hidden=false;loraBtn.hidden=false;loraBtn.disabled=false;loraBtn.textContent='⬇ 下载';}
+    else loraRow.hidden=true;
+  }else{
+    main.innerHTML='按你的显存（<b>'+(vr||'?')+'G</b>）推荐：<b>'+esc(rec.label)+'</b><br><span class="ob-note">'+esc(rec.note)+(rec.warn?' ⚠️':'')+'</span>';
+    dl.hidden=false;dl.disabled=false;dl.textContent='⬇ 一键下载推荐模型';dl.dataset.fn=rec.fn;
+    loraRow.hidden=true;
+  }
+  const d=m.download||{};
+  obUpdateBar(d);
+  if(d.status==='downloading')obPollStart();
+}
+function obRefresh(){
+  return fetch('/api/models').then(r=>r.json()).then(function(m){
+    if(m&&m.ok){obData=m;obRenderSpec();}
+    return m;
+  });
+}
+function obStartDl(btn,fn,okText){
+  btn.disabled=true;btn.textContent='发起下载…';
+  fetch('/api/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:fn})})
+    .then(r=>r.json()).then(function(d){
+      if(!d.ok){btn.disabled=false;btn.textContent=d.error||'下载失败';return;}
+      btn.textContent=okText;obRefresh();
+    }).catch(function(){btn.disabled=false;btn.textContent='网络错误，点我重试';});
+}
+$('#obDownload').addEventListener('click',function(){if(this.dataset.fn)obStartDl(this,this.dataset.fn,'⏳ 下载中，完成后自动就绪');});
+$('#obLoraBtn').addEventListener('click',function(){obStartDl(this,OB_LORA,'⏳ 下载中…');});
+$('#obRecheck').addEventListener('click',function(){
+  const t=this;t.disabled=true;
+  ['#obGpu','#obEngine','#obModels'].forEach(id=>{$(id).textContent='检测中…';});
+  obRefresh().then(function(){t.disabled=false;}).catch(function(){t.disabled=false;});
+});
+$('#obTry').addEventListener('click',function(){
+  const ta=$('#prompt');if(!ta)return;
+  ta.value='清晨的江南古镇，穿蓝印花布裙的女生撑油纸伞走过石拱桥，河面倒影轻晃，鸟鸣和摇橹声，镜头缓慢跟拍，电影感，8秒，超清';
+  obFinish();
+});
+function obFinish(){clearTimeout(obTimer);localStorage.setItem('h3onboard','1');$('#onboardOv').hidden=true;}
 function obGo(n){
   obStep=n;
   document.querySelectorAll('.ob-step').forEach(s=>s.classList.toggle('active',+s.dataset.step===n));
   document.querySelectorAll('.ob-dots i').forEach((d,i)=>d.classList.toggle('on',i<n));
-  if(n===2)obRecommend();
+  if(n===2)obRenderRec();
 }
-function obFinish(){
-  localStorage.setItem('h3onboard','1');
-  $('#onboardOv').hidden=true;
-  window.scrollTo({top:0,behavior:'smooth'});
-}
-function obRecommend(){
-  const m=window.H3MODELS; if(!m)return;
-  const vr=m.hardware&&m.hardware.vram_gb;
-  const el=$('#obModelRec');
-  if(!vr){el.textContent='无法检测显存，推荐下载最小的模型先验证流程。';return;}
-  let rec,label;
-  if(vr>=12){rec='minimax_h3_fl2va_pruned_int8_convrot.safetensors';label='INT8 基线（19.5G）— 最佳画质';}
-  else if(vr>=8){rec='minimax_h3_fl2va_pruned-Q4_K.gguf';label='GGUF Q4_K（10.6G）— 画质/显存平衡';}
-  else{rec='minimax_h3_fl2va_pruned-Q2_K.gguf';label='GGUF Q2_K（6.3G）— 仅验证用，画质差';}
-  const entry=(m.available||[]).find(x=>x.filename===rec)||(m.installed||[]).find(x=>x.filename===rec);
-  if(entry&&entry.installed){el.innerHTML='✅ 推荐模型 <b>'+esc(entry.label)+'</b> 已安装，可直接使用。';$('#obDownload').hidden=true;}
-  else{el.innerHTML='推荐下载 <b>'+esc(label)+'</b>';$('#obDownload').hidden=false;$('#obDownload').dataset.fn=rec;}
-}
-$('#obDownload').addEventListener('click',function(){
-  const fn=this.dataset.fn; if(!fn)return;
-  this.disabled=true;this.textContent='下载中…';
-  fetch('/api/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:fn})})
-    .then(r=>r.json()).then(d=>{
-      if(!d.ok){this.textContent=d.error||'下载失败';return;}
-      const st=$('#obModelStatus');st.hidden=false;
-      st.textContent='下载已启动，可在「模型库」查看进度。下载完成后即可开始创作。';
-      this.textContent='⏳ 下载中，可稍后下载其他模型';
-    });
-});
 (function(){
-  if(!localStorage.getItem('h3onboard')){
-    fetch('/api/models').then(r=>r.json()).then(m=>{
-      if(m.ok){$('#onboardOv').hidden=false;obGo(1);}
-    }).catch(function(){});
-  }
+  if(localStorage.getItem('h3onboard'))return;
+  obRefresh().then(function(m){
+    if(m&&m.ok){$('#onboardOv').hidden=false;obGo(1);}
+  }).catch(function(){});
 })();
 
 // ---------- v4.3 步数扫描联动 ----------
