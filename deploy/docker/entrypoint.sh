@@ -3,19 +3,28 @@
 set -e
 
 # ---------- 1. 主机 NVIDIA 驱动库发现（devices: 直通的经典配套） ----------
-# /hostlibs 只读挂载宿主机 /usr/lib/x86_64-linux-gnu，找到 libnvidia-ml 即定位驱动库目录
+# /hostlibs 只读挂载宿主机驱动库目录。注意：绝不能把整个宿主 lib 目录塞进
+# LD_LIBRARY_PATH（宿主 glibc 与容器不匹配会导致 mkdir 等基础工具
+# "stack smashing detected" 崩溃）——只挑 NVIDIA 相关库复制到容器内目录。
 if [ -d /hostlibs ]; then
   LIBDIR=$(find /hostlibs -maxdepth 2 -name "libnvidia-ml.so*" 2>/dev/null | head -1 | xargs -r dirname)
   if [ -n "$LIBDIR" ]; then
-    export LD_LIBRARY_PATH="$LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    export NVIDIA_DRIVER_ROOT="$LIBDIR"
-    echo "[entrypoint] host NVIDIA driver libs: $LIBDIR"
+    mkdir -p /driver-libs
+    # shellcheck disable=SC2044
+    for f in $(find /hostlibs -maxdepth 2 \( -name "libnvidia-ml.so*" -o -name "libcuda.so*" \
+        -o -name "libnvidia-ptxjitcompiler.so*" -o -name "libnvidia-nvvm.so*" \
+        -o -name "libnvidia-opencl.so*" -o -name "libnvidia-allocator.so*" \) 2>/dev/null); do
+      cp -Lf "$f" /driver-libs/ 2>/dev/null || true
+    done
+    export LD_LIBRARY_PATH="/driver-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    echo "[entrypoint] NVIDIA 驱动库已隔离注入: $(ls /driver-libs | wc -l) 个文件"
   else
     echo "[entrypoint] WARN: /hostlibs 挂载了但没找到 NVIDIA 驱动库——容器将以 CPU 降级模式运行"
   fi
 fi
 
 # ---------- 2. 持久卷接线（符号链接到 ComfyUI 标准目录） ----------
+mkdir -p /app/ComfyUI/models
 for d in diffusion_models text_encoders vae loras unet; do
   mkdir -p "/models/$d"
   ln -sfn "/models/$d" "/app/ComfyUI/models/$d"
