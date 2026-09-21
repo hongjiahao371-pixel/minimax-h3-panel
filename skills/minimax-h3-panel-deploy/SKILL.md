@@ -68,6 +68,20 @@ cd panel && python3 panel.py
 - **访问口令**（局域网外暴露时务必设置）：`config.json` 的 `access_password`，重启后浏览器首次访问会弹登录框。用 curl 调 API 时需带 `X-Panel-Token: <口令的sha256>` 头或走一次 `/api/login`。
 - **开机自启**：复制 `deploy/h3-panel.service` 到 `/etc/systemd/system/`，改掉里面的 `YOUR_USER` 与路径占位符，`sudo systemctl daemon-reload && sudo systemctl enable --now h3-panel`。
 
+## 部署形态二：单容器 Docker（面板 + ComfyUI 一体，NAS 推荐）
+
+不想宿主机装 ComfyUI/torch 时，用仓库 `deploy/docker/` 的单容器镜像（面板 8189 + ComfyUI 8188 同容器共享一套 python/torch，后处理直接可用）：
+
+```bash
+cd deploy/docker
+docker compose -f docker-compose.selfhost.yml up -d --build
+# 数据落点：模型卷、输出卷、/data 配置在 compose 顶部改
+```
+
+- 宿主机 NVIDIA 驱动库由 entrypoint 自动发现（挂载 `/usr/lib/x86_64-linux-gnu:ro` 后只挑 NVIDIA 库注入，见 troubleshooting 的驱动坑）；`nvidia.com/gpu` 类自装驱动 NAS 同理。
+- 模型权重放 ComfyUI 扫描目录（`/app/ComfyUI/models/diffusion_models` 或其真实落盘卷），页面「模型库」可直接下载部署。
+- 自托管 compose 允许 `privileged`/host 网络，但**商店 UPK 包不允许**——UPK 打包走 `ugos-upk-pack` 技能（含「整机镜像自构建」变体章节），不要拿这个 compose 直接打商店包。
+
 ## 更新已有部署
 
 ```bash
