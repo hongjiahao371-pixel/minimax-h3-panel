@@ -1334,6 +1334,9 @@ function openWS(){
   try{
     ws=new WebSocket(`ws://${location.hostname}:8188/ws?clientId=h3-panel`);
     ws.binaryType='arraybuffer';
+    ws.onopen=()=>{window._wsOk=true;};
+    ws.onerror=()=>{window._wsOk=false;window._wsTried=true;};
+    ws.onclose=()=>{window._wsOk=false;window._wsTried=true;};
     ws.onmessage=e=>{
       if(typeof e.data==='string'){
         try{const m=JSON.parse(e.data);
@@ -2032,6 +2035,16 @@ function updatePipe() {
     s.classList.toggle('active', i === act && act < defs.length);
     s.classList.toggle('done', i < act || act >= defs.length);
   });
+  let note = document.getElementById('pipeNote');
+  if (!note) {
+    note = document.createElement('div');
+    note.id = 'pipeNote';
+    note.style.cssText = 'font-size:11.5px;color:#98A2B3;margin-top:6px';
+    el.parentNode.appendChild(note);
+  }
+  note.textContent = (window._wsTried && !window._wsOk && pct === 0)
+    ? '提示：引擎事件通道（8188 端口）未连通，阶段指示暂不可用；生成不受影响，以上方总进度条为准。'
+    : '';
 }
 renderPipe();
 setInterval(updatePipe, 500);

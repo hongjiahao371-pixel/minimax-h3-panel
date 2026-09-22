@@ -58,8 +58,10 @@ EOF
 fi
 
 # ---------- 4. ComfyUI 后台启动 ----------
+# 监听 0.0.0.0：UPK/单容器部署时 8188 会发布到宿主机，前端工作流可视化
+# 需要浏览器直连 ComfyUI 的 WS 事件通道（面板自身走 127.0.0.1 同样可用）
 cd /app/ComfyUI
-/app/venv/bin/python main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch \
+/app/venv/bin/python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch \
   > /data/comfyui.log 2>&1 &
 echo "[entrypoint] ComfyUI 启动中（日志 /data/comfyui.log）..."
 /app/venv/bin/python - <<'PY'

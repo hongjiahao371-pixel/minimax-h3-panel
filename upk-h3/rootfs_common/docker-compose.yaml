@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "8189:8189"
+      # 工作流可视化需要浏览器直连 ComfyUI 的 WS 事件通道（仅局域网使用）
+      - "8188:8188"
     environment:
       TZ: Asia/Shanghai
       PANEL_CONFIG: /data/config.json
